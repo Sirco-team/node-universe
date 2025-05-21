@@ -63,7 +63,16 @@ app.get('/latest', (req, res) => {
                 body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 2em; }
                 h2 { color: #333; }
                 #container { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 2em; max-width: 600px; margin: auto; }
-                pre { background: #f4f4f4; padding: 1em; border-radius: 4px; }
+                pre { 
+                    background: #f4f4f4; 
+                    padding: 1em; 
+                    border-radius: 4px; 
+                    max-height: 400px; 
+                    max-width: 100%; 
+                    overflow: auto; 
+                    white-space: pre; 
+                    word-break: break-all;
+                }
                 #status { color: #888; font-size: 0.9em; margin-bottom: 1em; }
             </style>
         </head>
