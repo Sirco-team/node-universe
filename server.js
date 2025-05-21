@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const bodyParser = require('body-parser');
+const fs = require('fs');
+const https = require('https');
 
 const app = express();
 
@@ -10,6 +12,9 @@ const GITHUB_TOKEN = 'Z2hwXzhuMHpEWDBZNFprRHRDTzlGZGNwMTFJd3M1RDJBajRTa0Vwcg==';
 const GITHUB_REPO = 'Timmmy307/URL-SHORTINER-files';
 const GITHUB_FILE_PATH = 'analytics/log.jsonl';
 const PORT = process.env.PORT || 3000;
+const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
+const SSL_KEY_PATH = process.env.SSL_KEY_PATH || './key.pem';
+const SSL_CERT_PATH = process.env.SSL_CERT_PATH || './cert.pem';
 
 app.use(bodyParser.json());
 
@@ -58,11 +63,19 @@ async function updateFileOnGitHub(newContent, sha) {
     });
 }
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok' });
+});
+
 // Endpoint to receive analytics data
 app.post('/collect', async (req, res) => {
     try {
         const entry = req.body;
         entry._received = new Date().toISOString();
+
+        // Log incoming analytics for debugging
+        console.log('Received analytics:', entry);
 
         // Get current file content and sha
         const { sha, content } = await getFileFromGitHub();
@@ -85,6 +98,17 @@ app.get('/', (req, res) => {
     res.send('Server is running!');
 });
 
-app.listen(PORT, () => {
-    console.log(`Analytics backend listening on port ${PORT}`);
-});
+// Replace app.listen(PORT, ...) with HTTPS server:
+if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
+    const sslOptions = {
+        key: fs.readFileSync(SSL_KEY_PATH),
+        cert: fs.readFileSync(SSL_CERT_PATH)
+    };
+    https.createServer(sslOptions, app).listen(HTTPS_PORT, () => {
+        console.log(`Analytics backend listening on HTTPS port ${HTTPS_PORT}`);
+    });
+} else {
+    app.listen(PORT, () => {
+        console.log(`Analytics backend listening on HTTP port ${PORT} (SSL certs not found)`);
+    });
+}
