@@ -1,9 +1,9 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const bodyParser = require('body-parser');
 const fs = require('fs');
 const https = require('https');
-const cors = require('cors');
 
 const app = express();
 
@@ -13,8 +13,17 @@ const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 const SSL_KEY_PATH = process.env.SSL_KEY_PATH || './key.pem';
 const SSL_CERT_PATH = process.env.SSL_CERT_PATH || './cert.pem';
 
-app.use(bodyParser.json());
 app.use(cors());
+app.use(bodyParser.json());
+
+// Explicitly handle preflight OPTIONS requests for all routes
+app.options('*', cors());
+
+// Middleware to set ngrok-skip-browser-warning header for all responses
+app.use((req, res, next) => {
+    res.setHeader('ngrok-skip-browser-warning', 'true');
+    next();
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
