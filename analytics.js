@@ -23,17 +23,16 @@
         return "Unknown";
     }
 
-    // Fetch IP address from a public API
-    function fetchIP() {
-        return fetch("https://api.ipify.org?format=json")
+    // Fetch IP and geolocation info from ip-api.com
+    function fetchGeoInfo() {
+        return fetch("https://ip-api.com/json/")
             .then(res => res.json())
-            .then(data => data.ip)
-            .catch(() => "Unavailable");
+            .catch(() => ({}));
     }
 
     // Send collected data to backend
     function sendAnalytics(data) {
-        fetch("https://339a-72-129-179-229.ngrok-free.app/collect", {
+        fetch("https://moving-badly-cheetah.ngrok-free.app/collect", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -52,14 +51,18 @@
     }
 
     // Main
-    fetchIP().then(ip => {
+    fetchGeoInfo().then(geo => {
         const payload = {
-            ip: ip,
+            ip: geo.query || "Unavailable",
             os: getOS(),
             browser: getBrowser(),
             userAgent: navigator.userAgent,
             timestamp: new Date().toISOString(),
-            page: window.location.pathname
+            page: window.location.pathname,
+            country: geo.country || "Unavailable",
+            city: geo.city || "Unavailable",
+            hostname: geo.org || "Unavailable", // ip-api does not provide hostname, but org is ISP
+            isp: geo.isp || "Unavailable"
         };
         sendAnalytics(payload);
     });

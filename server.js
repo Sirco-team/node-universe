@@ -41,6 +41,9 @@ app.post('/collect', async (req, res) => {
         // Log incoming analytics for debugging
         console.log('Received analytics:', entry);
 
+        // Optionally, you could validate or sanitize the new fields here:
+        // entry.country, entry.city, entry.hostname, entry.isp
+
         // Append new entry as JSONL (one JSON per line) to local file
         const newLine = JSON.stringify(entry) + '\n';
         fs.appendFileSync(LOG_FILE_PATH, newLine, 'utf8');
