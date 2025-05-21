@@ -52,17 +52,17 @@ app.post('/collect', async (req, res) => {
     }
 });
 
-// Show the latest analytics entry as a user-friendly, auto-updating web page
+// Show the latest N analytics entries as a user-friendly, auto-updating web page
 app.get('/latest', (req, res) => {
     res.send(`
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Latest Analytics Entry</title>
+            <title>Latest Analytics Entries</title>
             <style>
                 body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 2em; }
                 h2 { color: #333; }
-                #container { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 2em; max-width: 600px; margin: auto; }
+                #container { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 2em; max-width: 800px; margin: auto; }
                 pre { 
                     background: #f4f4f4; 
                     padding: 1em; 
@@ -78,20 +78,28 @@ app.get('/latest', (req, res) => {
         </head>
         <body>
             <div id="container">
-                <h2>Latest Analytics Entry</h2>
+                <h2>Latest Analytics Entries</h2>
                 <div id="status">Loading latest data...</div>
-                <pre id="latest"></pre>
+                <div id="entries"></div>
             </div>
             <script>
+                const N = 10; // Number of latest entries to show
                 async function fetchLatest() {
                     try {
-                        const res = await fetch('/latest.json');
+                        const res = await fetch('/latest.json?n=' + N);
                         if (!res.ok) throw new Error('No data');
                         const data = await res.json();
-                        document.getElementById('latest').textContent = JSON.stringify(data, null, 2);
-                        document.getElementById('status').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+                        if (Array.isArray(data) && data.length > 0) {
+                            document.getElementById('entries').innerHTML = data.map((entry, i) =>
+                                '<pre>' + JSON.stringify(entry, null, 2) + '</pre>'
+                            ).join('');
+                            document.getElementById('status').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+                        } else {
+                            document.getElementById('entries').innerHTML = '';
+                            document.getElementById('status').textContent = 'No analytics data yet.';
+                        }
                     } catch (e) {
-                        document.getElementById('latest').textContent = '';
+                        document.getElementById('entries').innerHTML = '';
                         document.getElementById('status').textContent = 'No analytics data yet.';
                     }
                 }
@@ -103,18 +111,22 @@ app.get('/latest', (req, res) => {
     `);
 });
 
-// Serve latest analytics entry as JSON for AJAX polling
+// Serve latest N analytics entries as JSON for AJAX polling
 app.get('/latest.json', (req, res) => {
+    const n = parseInt(req.query.n, 10) || 10;
     if (!fs.existsSync(LOG_FILE_PATH)) {
-        return res.status(404).json({ error: 'No analytics data yet.' });
+        return res.status(404).json([]);
     }
-    const lines = fs.readFileSync(LOG_FILE_PATH, 'utf8').trim().split('\n');
-    const lastLine = lines[lines.length - 1];
+    // Filter out empty lines to avoid parsing errors
+    const lines = fs.readFileSync(LOG_FILE_PATH, 'utf8')
+        .split('\n')
+        .filter(line => line.trim().length > 0);
+    const lastNLines = lines.slice(-n);
     try {
-        const latest = JSON.parse(lastLine);
-        res.json(latest);
+        const entries = lastNLines.map(line => JSON.parse(line));
+        res.json(entries.reverse()); // newest first
     } catch {
-        res.status(500).json({ error: 'Error parsing latest analytics entry.' });
+        res.status(500).json([]);
     }
 });
 
