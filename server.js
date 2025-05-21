@@ -8,6 +8,7 @@ const https = require('https');
 const app = express();
 
 const LOG_FILE_PATH = './analytics-log.json';
+const NEWSLETTER_FILE_PATH = './newsletter-signups.jsonl';
 const PORT = process.env.PORT || 3000;
 const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 const SSL_KEY_PATH = process.env.SSL_KEY_PATH || './key.pem';
@@ -55,79 +56,91 @@ app.post('/collect', async (req, res) => {
     }
 });
 
-// Show the latest N analytics entries as a user-friendly, auto-updating web page
+// Endpoint to receive newsletter signups
+app.post('/newsletter', async (req, res) => {
+    try {
+        const entry = req.body;
+        entry._received = new Date().toISOString();
+        fs.appendFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(entry) + '\n', 'utf8');
+        res.status(200).json({ status: 'ok' });
+    } catch (err) {
+        console.error('Error handling newsletter signup:', err.message);
+        res.status(500).json({ status: 'error', error: err.message });
+    }
+});
+
+// Show the latest N analytics entries or newsletter signups as a user-friendly, auto-updating web page
 app.get('/latest', (req, res) => {
     res.send(`
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Latest Analytics Entries</title>
+            <title>Latest Data</title>
             <style>
                 body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 2em; }
-                h2 { color: #333; }
                 #container { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 2em; max-width: 800px; margin: auto; }
-                pre { 
-                    background: #f4f4f4; 
-                    padding: 1em; 
-                    border-radius: 4px; 
-                    max-height: 400px; 
-                    max-width: 100%; 
-                    overflow: auto; 
-                    white-space: pre; 
-                    word-break: break-all;
-                }
+                button { margin: 0 0.5em 1em 0; padding: 0.5em 1.5em; }
+                pre { background: #f4f4f4; padding: 1em; border-radius: 4px; max-height: 400px; max-width: 100%; overflow: auto; white-space: pre; word-break: break-all; }
                 #status { color: #888; font-size: 0.9em; margin-bottom: 1em; }
             </style>
         </head>
         <body>
             <div id="container">
-                <h2>Latest Analytics Entries</h2>
+                <h2>Latest Data</h2>
+                <button onclick="showType('analytics')">Analytics</button>
+                <button onclick="showType('newsletter')">Newsletter Signups</button>
                 <div id="status">Loading latest data...</div>
                 <div id="entries"></div>
             </div>
             <script>
-                const N = 10; // Number of latest entries to show
+                const N = 10;
+                let currentType = 'analytics';
+                function showType(type) {
+                    currentType = type;
+                    fetchLatest();
+                }
                 async function fetchLatest() {
                     try {
-                        const res = await fetch('/latest.json?n=' + N);
+                        const res = await fetch('/latest.json?type=' + currentType + '&n=' + N);
                         if (!res.ok) throw new Error('No data');
                         const data = await res.json();
                         if (Array.isArray(data) && data.length > 0) {
-                            document.getElementById('entries').innerHTML = data.map((entry, i) =>
+                            document.getElementById('entries').innerHTML = data.map(entry =>
                                 '<pre>' + JSON.stringify(entry, null, 2) + '</pre>'
                             ).join('');
                             document.getElementById('status').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
                         } else {
                             document.getElementById('entries').innerHTML = '';
-                            document.getElementById('status').textContent = 'No analytics data yet.';
+                            document.getElementById('status').textContent = 'No data yet.';
                         }
                     } catch (e) {
                         document.getElementById('entries').innerHTML = '';
-                        document.getElementById('status').textContent = 'No analytics data yet.';
+                        document.getElementById('status').textContent = 'No data yet.';
                     }
                 }
                 fetchLatest();
-                setInterval(fetchLatest, 3000); // auto-refresh every 3 seconds
+                setInterval(fetchLatest, 3000);
             </script>
         </body>
         </html>
     `);
 });
 
-// Serve latest N analytics entries as JSON for AJAX polling
+// Serve latest N analytics or newsletter entries as JSON for AJAX polling
 app.get('/latest.json', (req, res) => {
     const n = parseInt(req.query.n, 10) || 10;
-    if (!fs.existsSync(LOG_FILE_PATH)) {
+    const type = req.query.type === 'newsletter' ? 'newsletter' : 'analytics';
+    const file = type === 'newsletter' ? NEWSLETTER_FILE_PATH : LOG_FILE_PATH;
+    if (!fs.existsSync(file)) {
         return res.status(404).json([]);
     }
-    // Filter out empty lines to avoid parsing errors
-    const lines = fs.readFileSync(LOG_FILE_PATH, 'utf8')
+    const lines = fs.readFileSync(file, 'utf8')
         .split('\n')
         .filter(line => line.trim().length > 0);
     const lastNLines = lines.slice(-n);
     try {
         const entries = lastNLines.map(line => JSON.parse(line));
-        res.json(entries.reverse()); // newest first
+        res.json(entries.reverse());
     } catch {
         res.status(500).json([]);
     }

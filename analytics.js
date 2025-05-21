@@ -23,11 +23,15 @@
         return "Unknown";
     }
 
-    // Fetch IP and geolocation info from ip-api.com
+    // Fetch IP and geolocation info from IPinfo Lite API (free)
     function fetchGeoInfo() {
-        return fetch("https://ip-api.com/json/")
-            .then(res => res.json())
-            .catch(() => ({}));
+        return fetch("https://api.ipinfo.io/lite/me?token=c311e5ab3893df", {
+            headers: {
+                "Accept": "application/json"
+            }
+        })
+        .then(res => res.json())
+        .catch(() => ({}));
     }
 
     // Send collected data to backend
@@ -53,16 +57,18 @@
     // Main
     fetchGeoInfo().then(geo => {
         const payload = {
-            ip: geo.query || "Unavailable",
+            ip: geo.ip || "Unavailable",
             os: getOS(),
             browser: getBrowser(),
             userAgent: navigator.userAgent,
             timestamp: new Date().toISOString(),
             page: window.location.pathname,
-            country: geo.country || "Unavailable",
-            city: geo.city || "Unavailable",
-            hostname: geo.org || "Unavailable", // ip-api does not provide hostname, but org is ISP
-            isp: geo.isp || "Unavailable"
+            country: geo.country || geo.country_code || "Unavailable",
+            city: geo.city || "Unavailable", // Not available in Lite, will be "Unavailable"
+            hostname: geo.as_domain || "Unavailable",
+            isp: geo.as_name || geo.asn || "Unavailable",
+            asn: geo.asn || "Unavailable",
+            continent: geo.continent || geo.continent_code || "Unavailable"
         };
         sendAnalytics(payload);
     });
