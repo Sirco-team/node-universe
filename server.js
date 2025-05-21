@@ -7,7 +7,7 @@ const https = require('https');
 
 const app = express();
 
-const LOG_FILE_PATH = './analytics-log.jsonl';
+const LOG_FILE_PATH = './analytics-log.json';
 const PORT = process.env.PORT || 3000;
 const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 const SSL_KEY_PATH = process.env.SSL_KEY_PATH || './key.pem';
@@ -22,6 +22,8 @@ app.options('*', cors());
 // Middleware to set ngrok-skip-browser-warning header for all responses
 app.use((req, res, next) => {
     res.setHeader('ngrok-skip-browser-warning', 'true');
+    // Optionally, set a custom User-Agent for all responses (not requests)
+    // Note: To set a custom User-Agent for outgoing requests, do it in your frontend fetch code.
     next();
 });
 
@@ -50,23 +52,61 @@ app.post('/collect', async (req, res) => {
     }
 });
 
-// Show the latest analytics entry as a web page
+// Show the latest analytics entry as a user-friendly, auto-updating web page
 app.get('/latest', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Latest Analytics Entry</title>
+            <style>
+                body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 2em; }
+                h2 { color: #333; }
+                #container { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 2em; max-width: 600px; margin: auto; }
+                pre { background: #f4f4f4; padding: 1em; border-radius: 4px; }
+                #status { color: #888; font-size: 0.9em; margin-bottom: 1em; }
+            </style>
+        </head>
+        <body>
+            <div id="container">
+                <h2>Latest Analytics Entry</h2>
+                <div id="status">Loading latest data...</div>
+                <pre id="latest"></pre>
+            </div>
+            <script>
+                async function fetchLatest() {
+                    try {
+                        const res = await fetch('/latest.json');
+                        if (!res.ok) throw new Error('No data');
+                        const data = await res.json();
+                        document.getElementById('latest').textContent = JSON.stringify(data, null, 2);
+                        document.getElementById('status').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+                    } catch (e) {
+                        document.getElementById('latest').textContent = '';
+                        document.getElementById('status').textContent = 'No analytics data yet.';
+                    }
+                }
+                fetchLatest();
+                setInterval(fetchLatest, 3000); // auto-refresh every 3 seconds
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+// Serve latest analytics entry as JSON for AJAX polling
+app.get('/latest.json', (req, res) => {
     if (!fs.existsSync(LOG_FILE_PATH)) {
-        return res.send('<h2>No analytics data yet.</h2>');
+        return res.status(404).json({ error: 'No analytics data yet.' });
     }
     const lines = fs.readFileSync(LOG_FILE_PATH, 'utf8').trim().split('\n');
     const lastLine = lines[lines.length - 1];
-    let latest;
     try {
-        latest = JSON.parse(lastLine);
+        const latest = JSON.parse(lastLine);
+        res.json(latest);
     } catch {
-        return res.send('<h2>Error parsing latest analytics entry.</h2>');
+        res.status(500).json({ error: 'Error parsing latest analytics entry.' });
     }
-    res.send(`
-        <h2>Latest Analytics Entry</h2>
-        <pre>${JSON.stringify(latest, null, 2)}</pre>
-    `);
 });
 
 app.get('/', (req, res) => {
