@@ -36,7 +36,8 @@
         fetch("https://339a-72-129-179-229.ngrok-free.app/collect", {
             method: "POST",
             headers: {
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "ngrok-skip-browser-warning": "true"
             },
             body: JSON.stringify(data)
         })
