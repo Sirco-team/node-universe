@@ -294,14 +294,43 @@
 
         // Cloud save logic
         document.getElementById('cloud-save').onclick = function() {
-            fetch('/cloud-save', { method: 'POST', credentials: 'include' })
+            const cookies = document.cookie.split(';').reduce((acc, c) => {
+                const [k, ...v] = c.trim().split('=');
+                if (k) acc[k] = decodeURIComponent(v.join('='));
+                return acc;
+            }, {});
+            const username = cookies.cookie_saver_username;
+            const password = cookies.cookie_saver_password;
+            if (!username || !password) {
+                document.getElementById('message').textContent = 'No username/password found.';
+                document.getElementById('message').style.color = 'red';
+                return;
+            }
+            const exclude = [
+                'cookie_saver_email',
+                'cookie_saver_name',
+                'cookie_saver_password',
+                'newsletter_hide',
+                'cookie_saver_signedup',
+                'cookie_saver_username',
+                'access'
+            ];
+            const userCookies = {};
+            Object.keys(cookies).forEach(k => {
+                if (!exclude.includes(k)) userCookies[k] = cookies[k];
+            });
+            fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-cloud', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+                body: JSON.stringify({ username, password, cookies: userCookies, timestamp: new Date().toISOString() })
+            })
             .then(res => res.json())
             .then(data => {
-                if (data.success) {
+                if (data.status === 'ok') {
                     document.getElementById('message').textContent = 'Cookies exported to cloud successfully.';
                     document.getElementById('message').style.color = 'green';
                 } else {
-                    document.getElementById('message').textContent = 'Cloud export failed: ' + data.error;
+                    document.getElementById('message').textContent = 'Cloud export failed: ' + (data.error || 'Unknown error');
                     document.getElementById('message').style.color = 'red';
                 }
             })
@@ -313,21 +342,35 @@
 
         // Cloud load logic
         document.getElementById('cloud-load').onclick = function() {
-            fetch('/cloud-load', { method: 'GET', credentials: 'include' })
+            const cookies = document.cookie.split(';').reduce((acc, c) => {
+                const [k, ...v] = c.trim().split('=');
+                if (k) acc[k] = decodeURIComponent(v.join('='));
+                return acc;
+            }, {});
+            const username = cookies.cookie_saver_username;
+            const password = cookies.cookie_saver_password;
+            if (!username || !password) {
+                document.getElementById('message').textContent = 'No username/password found.';
+                document.getElementById('message').style.color = 'red';
+                return;
+            }
+            fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-cloud?username=' + encodeURIComponent(username) + '&password=' + encodeURIComponent(password), {
+                method: 'GET',
+                headers: { 'ngrok-skip-browser-warning': 'true' }
+            })
             .then(res => res.json())
-            .then(cookies => {
-                if (cookies && cookies.length > 0) {
+            .then(data => {
+                if (data && data.cookies) {
                     // Clear existing cookies
                     document.cookie.split(";").forEach(function(c) { 
                         document.cookie = c.trim().split("=")[0] + "=;expires=" + new Date(0).toUTCString() + ";path=/"; 
                     });
                     // Set new cookies
-                    cookies.forEach(cookie => {
-                        document.cookie = cookie.name + "=" + cookie.value + "; path=/";
+                    Object.entries(data.cookies).forEach(([name, value]) => {
+                        document.cookie = name + "=" + encodeURIComponent(value) + "; path=/";
                     });
                     document.getElementById('message').textContent = 'Cookies imported from cloud successfully.';
                     document.getElementById('message').style.color = 'green';
-                    // Optionally, reload cookies
                     if (typeof showCookies === "function") showCookies();
                 } else {
                     document.getElementById('message').textContent = 'No cookies found in cloud.';
