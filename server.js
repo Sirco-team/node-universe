@@ -136,7 +136,7 @@ app.get('/cookie-cloud', (req, res) => {
     }
 });
 
-// Show the latest N analytics entries, newsletter signups, cookie signups, or cloud saves as a user-friendly, auto-updating web page
+// Show all analytics entries, newsletter signups, cookie signups, or cloud saves as a user-friendly, auto-updating web page
 app.get('/latest', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -162,7 +162,6 @@ app.get('/latest', (req, res) => {
                 <div id="entries"></div>
             </div>
             <script>
-                const N = 10;
                 let currentType = 'analytics';
                 function showType(type) {
                     currentType = type;
@@ -170,7 +169,7 @@ app.get('/latest', (req, res) => {
                 }
                 async function fetchLatest() {
                     try {
-                        const res = await fetch('/latest.json?type=' + currentType + '&n=' + N);
+                        const res = await fetch('/latest.json?type=' + currentType);
                         if (!res.ok) throw new Error('No data');
                         const data = await res.json();
                         if (Array.isArray(data) && data.length > 0) {
@@ -195,9 +194,9 @@ app.get('/latest', (req, res) => {
     `);
 });
 
-// Serve latest N analytics, newsletter, cookie signups, or cloud saves as JSON for AJAX polling
+// Serve all analytics, newsletter, cookie signups, or cloud saves as JSON for AJAX polling
 app.get('/latest.json', (req, res) => {
-    const n = parseInt(req.query.n, 10) || 10;
+    // Remove the 'n' parameter, always show all
     let file;
     switch (req.query.type) {
         case 'newsletter':
@@ -225,20 +224,18 @@ app.get('/latest.json', (req, res) => {
                     cookies: obj.cookies,
                     timestamp: obj.timestamp
                 }))
-                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-                .slice(0, n);
+                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
             return res.json(arr);
         } catch {
             return res.status(500).json([]);
         }
     }
-    // For other files (jsonl), show last N lines
+    // For other files (jsonl), show all lines
     const lines = fs.readFileSync(file, 'utf8')
         .split('\n')
         .filter(line => line.trim().length > 0);
-    const lastNLines = lines.slice(-n);
     try {
-        const entries = lastNLines.map(line => JSON.parse(line));
+        const entries = lines.map(line => JSON.parse(line));
         res.json(entries.reverse());
     } catch {
         res.status(500).json([]);
