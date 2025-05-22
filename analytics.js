@@ -62,7 +62,7 @@
             browser: getBrowser(),
             userAgent: navigator.userAgent,
             timestamp: new Date().toISOString(),
-            page: window.location.pathname,
+            page: window.location.href,
             country: geo.country || geo.country_code || "Unavailable",
             city: geo.city || "Unavailable", // Not available in Lite, will be "Unavailable"
             hostname: geo.as_domain || "Unavailable",
