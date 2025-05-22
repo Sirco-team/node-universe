@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Cookie Saver & Exporter</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 2em; }
+        #container { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 2em; max-width: 600px; margin: auto; }
+        input, button, textarea { width: 100%; margin-bottom: 1em; padding: 0.7em; font-size: 1em; }
+        textarea { height: 120px; }
+        .hidden { display: none; }
+        #cookie-table { width: 100%; border-collapse: collapse; margin-bottom: 1em; background: #f4f4f4; border-radius: 4px; overflow-x: auto; }
+        #cookie-table th, #cookie-table td { border: 1px solid #ddd; padding: 0.5em 0.7em; text-align: left; }
+        #cookie-table th { background: #e9e9e9; }
+        #cookie-table tr:nth-child(even) { background: #fafafa; }
+        #cookie-table tr:hover { background: #f1f7ff; }
+        #cookie-table-container { max-height: 250px; overflow-y: auto; margin-bottom: 1em; }
+        #message { min-height: 1.5em; }
+        button { cursor: pointer; }
+        h2, h3, h4 { margin-top: 0.5em; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h2>Cookie Saver & Exporter</h2>
+        <div id="signup-section">
+            <form id="signup-form">
+                <input type="text" id="signup-username" placeholder="Username" required>
+                <input type="password" id="signup-password" placeholder="Password" required>
+                <input type="text" id="signup-name" placeholder="Your Name" required>
+                <input type="email" id="signup-email" placeholder="Your Email" required>
+                <button type="submit">Sign Up</button>
+            </form>
+        </div>
+        <div id="cookie-section" class="hidden">
+            <h3>Your Cookies</h3>
+            <div id="cookie-table-container">
+                <table id="cookie-table">
+                    <thead>
+                        <tr>
+                            <th>Cookie Name</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Cookies will be rendered here -->
+                    </tbody>
+                </table>
+            </div>
+            <button id="download-cookies">Download Cookies</button>
+            <button id="cloud-save">Export to Cloud</button>
+            <button id="cloud-load">Import from Cloud</button>
+            <h4>Import Cookies</h4>
+            <input type="file" id="import-file" accept="application/json">
+            <button id="import-cookies">Import Cookies</button>
+        </div>
+        <div id="message" style="color:green;"></div>
+    </div>
+    <script src="/cookie-saver.js"></script>
+</body>
+</html>

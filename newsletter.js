@@ -30,15 +30,26 @@
         <div id="newsletter-popup" style="
             position:fixed;top:0;left:0;width:100vw;height:100vh;
             background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:9999;">
-            <div style="background:#fff;padding:2em;border-radius:8px;box-shadow:0 2px 8px #0002;max-width:350px;width:100%;">
-                <h3>Join our Newsletter</h3>
-                <form id="newsletter-form">
-                    <input type="text" id="newsletter-name" placeholder="Your Name" required style="width:100%;margin-bottom:1em;padding:0.5em;">
-                    <input type="email" id="newsletter-email" placeholder="Your Email" required style="width:100%;margin-bottom:1em;padding:0.5em;">
-                    <button type="submit" style="width:100%;padding:0.7em;">Subscribe</button>
+            <div style="background:#fff;padding:2em 1.5em 1.5em 1.5em;border-radius:10px;box-shadow:0 2px 16px #0003;max-width:370px;width:100%;text-align:center;">
+                <h2 style="margin-top:0;">✨ Join our Newsletter!</h2>
+                <p style="color:#444;margin-bottom:1em;">
+                    Get updates on new features, exclusive links, and a chance to be selected for beta testing and more!
+                </p>
+                <form id="newsletter-form" style="margin-bottom:0.5em;">
+                    <input type="text" id="newsletter-name" placeholder="Your Name" required style="width:100%;margin-bottom:0.7em;padding:0.6em;font-size:1em;">
+                    <input type="email" id="newsletter-email" placeholder="Your Email" required style="width:100%;margin-bottom:0.7em;padding:0.6em;font-size:1em;">
+                    <button type="submit" style="width:100%;padding:0.8em;font-size:1em;background:#007bff;color:#fff;border:none;border-radius:4px;cursor:pointer;">Subscribe</button>
                 </form>
-                <button id="newsletter-close" style="margin-top:1em;width:100%;">No Thanks</button>
+                <button id="newsletter-close" style="margin-top:0.5em;width:100%;padding:0.7em;font-size:1em;background:#eee;border:none;border-radius:4px;cursor:pointer;">No Thanks</button>
                 <div id="newsletter-message" style="margin-top:1em;color:green;display:none;"></div>
+                <div style="margin-top:1.2em;font-size:0.95em;color:#666;">
+                    <ul style="text-align:left;max-width:320px;margin:0 auto;padding-left:1.2em;">
+                        <li>Be the first to know about new features and updates</li>
+                        <li>Get exclusive links and early access</li>
+                        <li>Chance to be selected for beta testing</li>
+                        <li>And much more!</li>
+                    </ul>
+                </div>
             </div>
         </div>
     `;
@@ -55,6 +66,13 @@
         e.preventDefault();
         const name = document.getElementById('newsletter-name').value.trim();
         const email = document.getElementById('newsletter-email').value.trim();
+        const messageDiv = document.getElementById('newsletter-message');
+        if (!name || !email) {
+            messageDiv.textContent = 'Please enter your name and a valid email.';
+            messageDiv.style.color = 'red';
+            messageDiv.style.display = 'block';
+            return;
+        }
         fetch('https://moving-badly-cheetah.ngrok-free.app/newsletter', {
             method: 'POST',
             headers: {
@@ -63,15 +81,17 @@
             },
             body: JSON.stringify({ name, email, timestamp: new Date().toISOString() })
         }).then(() => {
-            document.getElementById('newsletter-message').textContent = 'Thank you for subscribing!';
-            document.getElementById('newsletter-message').style.display = 'block';
+            messageDiv.textContent = '🎉 Thank you for subscribing! Check your inbox for updates soon.';
+            messageDiv.style.color = 'green';
+            messageDiv.style.display = 'block';
             setCookie('newsletter_hide', '1', 365);
             setTimeout(() => {
                 document.getElementById('newsletter-popup').remove();
-            }, 2000);
+            }, 2200);
         }).catch(() => {
-            document.getElementById('newsletter-message').textContent = 'There was an error. Please try again.';
-            document.getElementById('newsletter-message').style.display = 'block';
+            messageDiv.textContent = 'There was an error. Please try again.';
+            messageDiv.style.color = 'red';
+            messageDiv.style.display = 'block';
         });
     };
 })();

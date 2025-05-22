@@ -9,6 +9,8 @@ const app = express();
 
 const LOG_FILE_PATH = './analytics-log.json';
 const NEWSLETTER_FILE_PATH = './newsletter-signups.jsonl';
+const COOKIE_SIGNUP_FILE = './cookie-signups.jsonl';
+const COOKIE_CLOUD_FILE = './cookie-cloud.json';
 const PORT = process.env.PORT || 3000;
 const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 const SSL_KEY_PATH = process.env.SSL_KEY_PATH || './key.pem';
@@ -66,6 +68,50 @@ app.post('/newsletter', async (req, res) => {
     } catch (err) {
         console.error('Error handling newsletter signup:', err.message);
         res.status(500).json({ status: 'error', error: err.message });
+    }
+});
+
+// Signup info endpoint
+app.post('/cookie-signup', async (req, res) => {
+    try {
+        const entry = req.body;
+        entry._received = new Date().toISOString();
+        fs.appendFileSync(COOKIE_SIGNUP_FILE, JSON.stringify(entry) + '\n', 'utf8');
+        res.status(200).json({ status: 'ok' });
+    } catch (err) {
+        res.status(500).json({ status: 'error', error: err.message });
+    }
+});
+
+// Cloud save (one save per username)
+app.post('/cookie-cloud', async (req, res) => {
+    try {
+        let saves = {};
+        if (fs.existsSync(COOKIE_CLOUD_FILE)) {
+            saves = JSON.parse(fs.readFileSync(COOKIE_CLOUD_FILE, 'utf8'));
+        }
+        const { username, password, cookies, timestamp } = req.body;
+        saves[username] = { password, cookies, timestamp };
+        fs.writeFileSync(COOKIE_CLOUD_FILE, JSON.stringify(saves, null, 2), 'utf8');
+        res.status(200).json({ status: 'ok' });
+    } catch (err) {
+        res.status(500).json({ status: 'error', error: err.message });
+    }
+});
+
+// Cloud load (get save by username/password)
+app.get('/cookie-cloud', (req, res) => {
+    try {
+        const { username, password } = req.query;
+        if (!username || !password) return res.status(400).json({ error: 'Missing credentials' });
+        if (!fs.existsSync(COOKIE_CLOUD_FILE)) return res.status(404).json({ error: 'No saves' });
+        const saves = JSON.parse(fs.readFileSync(COOKIE_CLOUD_FILE, 'utf8'));
+        if (!saves[username] || saves[username].password !== password) {
+            return res.status(404).json({ error: 'Not found or wrong password' });
+        }
+        res.json({ cookies: saves[username].cookies });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
