@@ -291,10 +291,7 @@ app.get('/shortener', (req, res) => {
 
 // Create or update a link (POST)
 app.post('/shortener', (req, res) => {
-    const { code, url, status, ownerPass } = req.body;
-    if ((ownerPass || '').trim() !== OWNER_PASSWORD) {
-        return res.status(403).json({ error: 'Invalid owner password' });
-    }
+    const { code, url, status } = req.body;
     if (!code || !url) {
         return res.status(400).json({ error: 'Missing code or url' });
     }
@@ -310,10 +307,6 @@ app.post('/shortener', (req, res) => {
 
 // Delete a link (DELETE)
 app.delete('/shortener/:code', (req, res) => {
-    const { ownerPass } = req.body;
-    if ((ownerPass || '').trim() !== OWNER_PASSWORD) {
-        return res.status(403).json({ error: 'Invalid owner password' });
-    }
     const code = req.params.code;
     try {
         const db = loadLinksDB();

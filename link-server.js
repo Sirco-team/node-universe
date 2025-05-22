@@ -43,12 +43,14 @@ async function saveDB(db) {
 
 // Create or update a link on main server
 async function createOrUpdateLink(code, url, status) {
-    await axios.post(MAIN_SERVER_URL, { code, url, status, ownerPass: OWNER_PASSWORD });
+    // No ownerPass needed anymore
+    await axios.post(MAIN_SERVER_URL, { code, url, status });
 }
 
 // Delete a link on main server
 async function deleteLink(code) {
-    await axios.delete(`${MAIN_SERVER_URL}/${encodeURIComponent(code)}`, { data: { ownerPass: OWNER_PASSWORD } });
+    // No ownerPass needed anymore
+    await axios.delete(`${MAIN_SERVER_URL}/${encodeURIComponent(code)}`);
 }
 
 // Helper for global creation toggle (now in links.json)
