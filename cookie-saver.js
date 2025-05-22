@@ -23,7 +23,8 @@ function getUserCookies() {
         'cookie_saver_password',
         'newsletter_hide',
         'cookie_saver_signedup',
-        'cookie_saver_username'
+        'cookie_saver_username',
+        'access'
     ];
     const all = getAllCookies();
     const filtered = {};
@@ -41,7 +42,8 @@ function setAllCookies(cookieObj, days=365) {
         'cookie_saver_password',
         'newsletter_hide',
         'cookie_saver_signedup',
-        'cookie_saver_username'
+        'cookie_saver_username',
+        'access'
     ];
     Object.entries(cookieObj).forEach(([k, v]) => {
         if (!exclude.includes(k)) setCookie(k, v, days);
@@ -97,11 +99,39 @@ function clearAccountCookies() {
     });
 }
 
-// On load, check if signed up
+// On load, check if signed up and verify account with server
 window.addEventListener('DOMContentLoaded', () => {
-    if (getAllCookies().cookie_saver_signedup === '1') {
-        showSection('cookie-section');
-        showCookies();
+    const cookies = getAllCookies();
+    if (cookies.cookie_saver_signedup === '1') {
+        // Verify account with server before showing cookies
+        const username = cookies.cookie_saver_username;
+        const password = cookies.cookie_saver_password;
+        if (username && password) {
+            fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-verify', { // <--- use only ngrok URL
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.valid) {
+                    showSection('cookie-section');
+                    showCookies();
+                } else {
+                    clearAccountCookies();
+                    showSection('signup-section');
+                    showMessage('Account not valid. Please sign up or log in again.', 'red');
+                }
+            })
+            .catch(() => {
+                clearAccountCookies();
+                showSection('signup-section');
+                showMessage('Could not verify account. Please try again.', 'red');
+            });
+        } else {
+            clearAccountCookies();
+            showSection('signup-section');
+        }
     }
 });
 
@@ -117,12 +147,15 @@ document.getElementById('signup-form').onsubmit = function(e) {
         return;
     }
     // Check with server if account is valid or needs to be created
-    fetch('/cookie-verify', {
+    fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
     })
-    .then(res => res.json())
+    .then(res => {
+        if (!res.ok) throw new Error('Network error');
+        return res.json();
+    })
     .then(data => {
         if (data.valid) {
             setCookie('cookie_saver_signedup', '1', 365);
@@ -139,19 +172,27 @@ document.getElementById('signup-form').onsubmit = function(e) {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
                 body: JSON.stringify({ username, password, name, email, timestamp: new Date().toISOString() })
+            })
+            .then(resp => {
+                if (!resp.ok) throw new Error('Network error');
+                setCookie('cookie_saver_signedup', '1', 365);
+                setCookie('cookie_saver_username', username, 365);
+                setCookie('cookie_saver_password', password, 365);
+                setCookie('cookie_saver_name', name, 365);
+                setCookie('cookie_saver_email', email, 365);
+                showSection('cookie-section');
+                showCookies();
+                showMessage('Signed up and cookies saved!');
+            })
+            .catch(() => {
+                showMessage('Could not create account. Please try again.', 'red');
+                clearAccountCookies();
+                showSection('signup-section');
             });
-            setCookie('cookie_saver_signedup', '1', 365);
-            setCookie('cookie_saver_username', username, 365);
-            setCookie('cookie_saver_password', password, 365);
-            setCookie('cookie_saver_name', name, 365);
-            setCookie('cookie_saver_email', email, 365);
-            showSection('cookie-section');
-            showCookies();
-            showMessage('Signed up and cookies saved!');
         }
     })
     .catch(() => {
-        showMessage('Could not verify or create account.', 'red');
+        showMessage('Could not verify or create account. Please check your connection.', 'red');
         clearAccountCookies();
         showSection('signup-section');
     });
@@ -235,5 +276,34 @@ document.getElementById('cloud-load').onclick = function() {
     })
     .catch(() => {
         showMessage('Cloud load failed.', 'red');
+    });
+};
+
+// Recover username/password by email and name
+document.getElementById('recover-btn').onclick = function() {
+    const email = document.getElementById('recover-email').value.trim();
+    const name = document.getElementById('recover-name').value.trim();
+    if (!email || !name) {
+        showMessage('Please enter your email and name.', 'red');
+        return;
+    }
+    fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-recover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ email, name })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data && data.username && data.password) {
+            showMessage(`Recovered! Username: ${data.username}, Password: ${data.password}`, 'green');
+            // Optionally, auto-fill the login/signup form:
+            document.getElementById('signup-username').value = data.username;
+            document.getElementById('signup-password').value = data.password;
+        } else {
+            showMessage('No account found for that email and name.', 'red');
+        }
+    })
+    .catch(() => {
+        showMessage('Recovery failed. Please try again.', 'red');
     });
 };

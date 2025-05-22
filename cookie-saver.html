@@ -31,6 +31,39 @@
                 <input type="email" id="signup-email" placeholder="Your Email" required>
                 <button type="submit">Sign Up</button>
             </form>
+            <div style="margin: 1em 0; text-align: center;">
+                <span>Already have an account?</span>
+                <button id="show-signin" type="button">Sign In</button>
+            </div>
+            <div style="margin: 1em 0; text-align: center;">
+                <span>Forgot your username or password?</span>
+                <button id="show-recover" type="button">Recover Account</button>
+            </div>
+        </div>
+        <div id="signin-section" class="hidden">
+            <form id="signin-form">
+                <input type="text" id="signin-username" placeholder="Username" required>
+                <input type="password" id="signin-password" placeholder="Password" required>
+                <button type="submit">Sign In</button>
+            </form>
+            <div style="margin: 1em 0; text-align: center;">
+                <span>Don't have an account?</span>
+                <button id="show-signup" type="button">Sign Up</button>
+            </div>
+            <div style="margin: 1em 0; text-align: center;">
+                <span>Forgot your username or password?</span>
+                <button id="show-recover2" type="button">Recover Account</button>
+            </div>
+        </div>
+        <div id="recover-section" class="hidden">
+            <h4>Recover Username/Password</h4>
+            <input id="recover-email" type="email" placeholder="Your Email">
+            <input id="recover-name" type="text" placeholder="Your Name">
+            <button id="recover-btn" type="button">Recover</button>
+            <div style="margin: 1em 0; text-align: center;">
+                <button id="back-to-signup" type="button">Back to Sign Up</button>
+                <button id="back-to-signin" type="button">Back to Sign In</button>
+            </div>
         </div>
         <div id="cookie-section" class="hidden">
             <h3>Your Cookies</h3>
@@ -58,7 +91,7 @@
     </div>
     <script src="/cookie-saver.js"></script>
     <script>
-        // On every page load, verify account with the server
+        // On every page load, verify account with the server (only if not already signed in)
         window.addEventListener('DOMContentLoaded', function() {
             const getCookie = (name) => {
                 const nameEQ = name + "=";
@@ -72,8 +105,9 @@
             };
             const username = getCookie('cookie_saver_username');
             const password = getCookie('cookie_saver_password');
-            if (username && password) {
-                fetch('/cookie-verify', {
+            // Only check if not already in cookie-section
+            if (username && password && document.getElementById('cookie-section').classList.contains('hidden')) {
+                fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-verify', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, password })
@@ -81,21 +115,263 @@
                 .then(res => res.json())
                 .then(data => {
                     if (!data.valid) {
-                        // Invalidate session and show signup
                         document.getElementById('signup-section').classList.remove('hidden');
                         document.getElementById('cookie-section').classList.add('hidden');
                         document.getElementById('message').textContent = 'Account not valid. Please sign up or log in again.';
-                        // Optionally, clear cookies
                         document.cookie = "cookie_saver_signedup=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
                     }
                 })
                 .catch(() => {
-                    document.getElementById('signup-section').classList.remove('hidden');
-                    document.getElementById('cookie-section').classList.add('hidden');
-                    document.getElementById('message').textContent = 'Could not verify account. Please try again.';
+                    // Only show error if not already signed in
+                    if (document.getElementById('cookie-section').classList.contains('hidden')) {
+                        document.getElementById('signup-section').classList.remove('hidden');
+                        document.getElementById('cookie-section').classList.add('hidden');
+                        document.getElementById('message').textContent = '';
+                    }
                 });
             }
         });
+
+        // UI logic for switching sections
+        function hideAllSections() {
+            document.getElementById('signup-section').classList.add('hidden');
+            document.getElementById('signin-section').classList.add('hidden');
+            document.getElementById('recover-section').classList.add('hidden');
+            document.getElementById('cookie-section').classList.add('hidden');
+        }
+
+        document.getElementById('show-signin').onclick = function() {
+            hideAllSections();
+            document.getElementById('signin-section').classList.remove('hidden');
+        };
+        document.getElementById('show-signup').onclick = function() {
+            hideAllSections();
+            document.getElementById('signup-section').classList.remove('hidden');
+        };
+        document.getElementById('show-recover').onclick = function() {
+            hideAllSections();
+            document.getElementById('recover-section').classList.remove('hidden');
+        };
+        document.getElementById('show-recover2').onclick = function() {
+            hideAllSections();
+            document.getElementById('recover-section').classList.remove('hidden');
+        };
+        document.getElementById('back-to-signup').onclick = function() {
+            hideAllSections();
+            document.getElementById('signup-section').classList.remove('hidden');
+        };
+        document.getElementById('back-to-signin').onclick = function() {
+            hideAllSections();
+            document.getElementById('signin-section').classList.remove('hidden');
+        };
+
+        // Sign in form logic
+        document.getElementById('signin-form').onsubmit = function(e) {
+            e.preventDefault();
+            const username = document.getElementById('signin-username').value.trim();
+            const password = document.getElementById('signin-password').value.trim();
+            if (!username || !password) {
+                document.getElementById('message').textContent = 'Please enter username and password.';
+                document.getElementById('message').style.color = 'red';
+                return;
+            }
+            fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.valid) {
+                    // Set cookies and show cookie section
+                    document.cookie = 'cookie_saver_signedup=1; path=/;';
+                    document.cookie = 'cookie_saver_username=' + encodeURIComponent(username) + '; path=/;';
+                    document.cookie = 'cookie_saver_password=' + encodeURIComponent(password) + '; path=/;';
+                    document.getElementById('message').textContent = 'Signed in!';
+                    document.getElementById('message').style.color = 'green';
+                    hideAllSections();
+                    document.getElementById('cookie-section').classList.remove('hidden');
+                    // Optionally reload cookies
+                    if (typeof showCookies === "function") showCookies();
+                } else {
+                    document.getElementById('message').textContent = 'Invalid username or password.';
+                    document.getElementById('message').style.color = 'red';
+                }
+            })
+            .catch(() => {
+                document.getElementById('message').textContent = 'Could not sign in. Please try again.';
+                document.getElementById('message').style.color = 'red';
+            });
+        };
+
+        // Sign up form logic
+        document.getElementById('signup-form').onsubmit = function(e) {
+            e.preventDefault();
+            const username = document.getElementById('signup-username').value.trim();
+            const password = document.getElementById('signup-password').value.trim();
+            const name = document.getElementById('signup-name').value.trim();
+            const email = document.getElementById('signup-email').value.trim();
+            if (!username || !password || !name || !email) {
+                document.getElementById('message').textContent = 'Please fill in all fields.';
+                document.getElementById('message').style.color = 'red';
+                return;
+            }
+            fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password, name, email })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('message').textContent = 'Sign up successful! You can now sign in.';
+                    document.getElementById('message').style.color = 'green';
+                    hideAllSections();
+                    document.getElementById('signin-section').classList.remove('hidden');
+                } else {
+                    document.getElementById('message').textContent = 'Sign up failed: ' + data.error;
+                    document.getElementById('message').style.color = 'red';
+                }
+            })
+            .catch(() => {
+                document.getElementById('message').textContent = 'Could not sign up. Please try again.';
+                document.getElementById('message').style.color = 'red';
+            });
+        };
+
+        // Account recovery logic
+        document.getElementById('recover-btn').onclick = function() {
+            const email = document.getElementById('recover-email').value.trim();
+            const name = document.getElementById('recover-name').value.trim();
+            if (!email || !name) {
+                document.getElementById('message').textContent = 'Please enter your email and name.';
+                document.getElementById('message').style.color = 'red';
+                return;
+            }
+            fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-recover', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, name })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('message').textContent = 'Recovery email sent! Please check your inbox.';
+                    document.getElementById('message').style.color = 'green';
+                    hideAllSections();
+                    document.getElementById('signin-section').classList.remove('hidden');
+                } else {
+                    document.getElementById('message').textContent = 'Recovery failed: ' + data.error;
+                    document.getElementById('message').style.color = 'red';
+                }
+            })
+            .catch(() => {
+                document.getElementById('message').textContent = 'Could not recover account. Please try again.';
+                document.getElementById('message').style.color = 'red';
+            });
+        };
+
+        // Cookie download logic
+        document.getElementById('download-cookies').onclick = function() {
+            fetch('/cookie-export', { method: 'GET', credentials: 'include' })
+            .then(res => res.json())
+            .then(cookies => {
+                const blob = new Blob([JSON.stringify(cookies, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'cookies.json';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            })
+            .catch(() => {
+                document.getElementById('message').textContent = 'Could not download cookies. Please try again.';
+                document.getElementById('message').style.color = 'red';
+            });
+        };
+
+        // Cloud save logic
+        document.getElementById('cloud-save').onclick = function() {
+            fetch('/cloud-save', { method: 'POST', credentials: 'include' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('message').textContent = 'Cookies exported to cloud successfully.';
+                    document.getElementById('message').style.color = 'green';
+                } else {
+                    document.getElementById('message').textContent = 'Cloud export failed: ' + data.error;
+                    document.getElementById('message').style.color = 'red';
+                }
+            })
+            .catch(() => {
+                document.getElementById('message').textContent = 'Could not export to cloud. Please try again.';
+                document.getElementById('message').style.color = 'red';
+            });
+        };
+
+        // Cloud load logic
+        document.getElementById('cloud-load').onclick = function() {
+            fetch('/cloud-load', { method: 'GET', credentials: 'include' })
+            .then(res => res.json())
+            .then(cookies => {
+                if (cookies && cookies.length > 0) {
+                    // Clear existing cookies
+                    document.cookie.split(";").forEach(function(c) { 
+                        document.cookie = c.trim().split("=")[0] + "=;expires=" + new Date(0).toUTCString() + ";path=/"; 
+                    });
+                    // Set new cookies
+                    cookies.forEach(cookie => {
+                        document.cookie = cookie.name + "=" + cookie.value + "; path=/";
+                    });
+                    document.getElementById('message').textContent = 'Cookies imported from cloud successfully.';
+                    document.getElementById('message').style.color = 'green';
+                    // Optionally, reload cookies
+                    if (typeof showCookies === "function") showCookies();
+                } else {
+                    document.getElementById('message').textContent = 'No cookies found in cloud.';
+                    document.getElementById('message').style.color = 'red';
+                }
+            })
+            .catch(() => {
+                document.getElementById('message').textContent = 'Could not import from cloud. Please try again.';
+                document.getElementById('message').style.color = 'red';
+            });
+        };
+
+        // Import cookies logic
+        document.getElementById('import-cookies').onclick = function() {
+            const fileInput = document.getElementById('import-file');
+            if (fileInput.files.length === 0) {
+                document.getElementById('message').textContent = 'Please select a file to import.';
+                document.getElementById('message').style.color = 'red';
+                return;
+            }
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const cookies = JSON.parse(e.target.result);
+                    // Clear existing cookies
+                    document.cookie.split(";").forEach(function(c) { 
+                        document.cookie = c.trim().split("=")[0] + "=;expires=" + new Date(0).toUTCString() + ";path=/"; 
+                    });
+                    // Set new cookies
+                    cookies.forEach(cookie => {
+                        document.cookie = cookie.name + "=" + cookie.value + "; path=/";
+                    });
+                    document.getElementById('message').textContent = 'Cookies imported successfully.';
+                    document.getElementById('message').style.color = 'green';
+                    // Optionally, reload cookies
+                    if (typeof showCookies === "function") showCookies();
+                } catch (err) {
+                    document.getElementById('message').textContent = 'Invalid file format. Please upload a valid JSON file.';
+                    document.getElementById('message').style.color = 'red';
+                }
+            };
+            reader.readAsText(file);
+        };
     </script>
 </body>
 </html>

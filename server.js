@@ -260,6 +260,73 @@ app.post('/cookie-verify', (req, res) => {
     }
 });
 
+// Link shortener endpoints
+const LINK_DB_FILE = path.join(__dirname, 'links.json');
+
+// Helper to load/save link DB
+function loadLinksDB() {
+    if (!fs.existsSync(LINK_DB_FILE)) return {};
+    try {
+        return JSON.parse(fs.readFileSync(LINK_DB_FILE, 'utf8'));
+    } catch {
+        return {};
+    }
+}
+function saveLinksDB(db) {
+    fs.writeFileSync(LINK_DB_FILE, JSON.stringify(db, null, 2), 'utf8');
+}
+
+// REST API for link shortener server
+
+// Get all links
+app.get('/shortener', (req, res) => {
+    try {
+        const db = loadLinksDB();
+        res.json(db);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to read links.json" });
+    }
+});
+
+// Create or update a link
+app.post('/shortener', (req, res) => {
+    const { code, url, status, ownerPass } = req.body;
+    if ((ownerPass || '').trim() !== OWNER_PASSWORD) {
+        return res.status(403).json({ error: 'Invalid owner password' });
+    }
+    if (!code || !url) {
+        return res.status(400).json({ error: 'Missing code or url' });
+    }
+    try {
+        const db = loadLinksDB();
+        db[code] = { url, status: status || "active" };
+        saveLinksDB(db);
+        res.json({ success: true, code });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to update links.json" });
+    }
+});
+
+// Delete a link
+app.delete('/shortener/:code', (req, res) => {
+    const { ownerPass } = req.body;
+    if ((ownerPass || '').trim() !== OWNER_PASSWORD) {
+        return res.status(403).json({ error: 'Invalid owner password' });
+    }
+    const code = req.params.code;
+    try {
+        const db = loadLinksDB();
+        if (!(code in db)) {
+            return res.status(404).json({ error: 'Code not found' });
+        }
+        delete db[code];
+        saveLinksDB(db);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: "Failed to update links.json" });
+    }
+});
+
 app.get('/', (req, res) => {
     res.send('Server is running!');
 });
