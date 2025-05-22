@@ -4,13 +4,19 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const fs = require('fs');
 const https = require('https');
+const path = require('path');
 
 const app = express();
 
-const LOG_FILE_PATH = './analytics-log.json';
-const NEWSLETTER_FILE_PATH = './newsletter-signups.jsonl';
-const COOKIE_SIGNUP_FILE = './cookie-signups.jsonl';
-const COOKIE_CLOUD_FILE = './cookie-cloud.json';
+// Update all file paths to use /data directory
+const DATA_DIR = path.join(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+const LOG_FILE_PATH = path.join(DATA_DIR, 'analytics-log.json');
+const NEWSLETTER_FILE_PATH = path.join(DATA_DIR, 'newsletter-signups.json');
+const COOKIE_SIGNUP_FILE = path.join(DATA_DIR, 'cookie-signups.json');
+const COOKIE_CLOUD_FILE = path.join(DATA_DIR, 'cookie-cloud.json');
 const PORT = process.env.PORT || 3000;
 const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 const SSL_KEY_PATH = process.env.SSL_KEY_PATH || './key.pem';
