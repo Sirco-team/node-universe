@@ -115,13 +115,27 @@ app.get('/cookie-cloud', (req, res) => {
         if (!saves[username] || saves[username].password !== password) {
             return res.status(404).json({ error: 'Not found or wrong password' });
         }
-        res.json({ cookies: saves[username].cookies });
+        // Only return user cookies, not internal/service cookies
+        const exclude = [
+            'cookie_saver_email',
+            'cookie_saver_name',
+            'cookie_saver_password',
+            'newsletter_hide',
+            'cookie_saver_signedup',
+            'cookie_saver_username'
+        ];
+        const allCookies = saves[username].cookies || {};
+        const userCookies = {};
+        Object.keys(allCookies).forEach(k => {
+            if (!exclude.includes(k)) userCookies[k] = allCookies[k];
+        });
+        res.json({ cookies: userCookies });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// Show the latest N analytics entries or newsletter signups as a user-friendly, auto-updating web page
+// Show the latest N analytics entries, newsletter signups, cookie signups, or cloud saves as a user-friendly, auto-updating web page
 app.get('/latest', (req, res) => {
     res.send(`
         <!DOCTYPE html>
@@ -130,7 +144,7 @@ app.get('/latest', (req, res) => {
             <title>Latest Data</title>
             <style>
                 body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 2em; }
-                #container { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 2em; max-width: 800px; margin: auto; }
+                #container { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 2em; max-width: 900px; margin: auto; }
                 button { margin: 0 0.5em 1em 0; padding: 0.5em 1.5em; }
                 pre { background: #f4f4f4; padding: 1em; border-radius: 4px; max-height: 400px; max-width: 100%; overflow: auto; white-space: pre; word-break: break-all; }
                 #status { color: #888; font-size: 0.9em; margin-bottom: 1em; }
@@ -141,6 +155,8 @@ app.get('/latest', (req, res) => {
                 <h2>Latest Data</h2>
                 <button onclick="showType('analytics')">Analytics</button>
                 <button onclick="showType('newsletter')">Newsletter Signups</button>
+                <button onclick="showType('cookie-signup')">Cookie Signups</button>
+                <button onclick="showType('cookie-cloud')">Cloud Cookie Saves</button>
                 <div id="status">Loading latest data...</div>
                 <div id="entries"></div>
             </div>
@@ -178,14 +194,44 @@ app.get('/latest', (req, res) => {
     `);
 });
 
-// Serve latest N analytics or newsletter entries as JSON for AJAX polling
+// Serve latest N analytics, newsletter, cookie signups, or cloud saves as JSON for AJAX polling
 app.get('/latest.json', (req, res) => {
     const n = parseInt(req.query.n, 10) || 10;
-    const type = req.query.type === 'newsletter' ? 'newsletter' : 'analytics';
-    const file = type === 'newsletter' ? NEWSLETTER_FILE_PATH : LOG_FILE_PATH;
+    let file;
+    switch (req.query.type) {
+        case 'newsletter':
+            file = NEWSLETTER_FILE_PATH;
+            break;
+        case 'cookie-signup':
+            file = COOKIE_SIGNUP_FILE;
+            break;
+        case 'cookie-cloud':
+            file = COOKIE_CLOUD_FILE;
+            break;
+        default:
+            file = LOG_FILE_PATH;
+    }
     if (!fs.existsSync(file)) {
         return res.status(404).json([]);
     }
+    // For cookie-cloud, show as array of {username, cookies, timestamp}
+    if (req.query.type === 'cookie-cloud') {
+        try {
+            const saves = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const arr = Object.entries(saves)
+                .map(([username, obj]) => ({
+                    username,
+                    cookies: obj.cookies,
+                    timestamp: obj.timestamp
+                }))
+                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                .slice(0, n);
+            return res.json(arr);
+        } catch {
+            return res.status(500).json([]);
+        }
+    }
+    // For other files (jsonl), show last N lines
     const lines = fs.readFileSync(file, 'utf8')
         .split('\n')
         .filter(line => line.trim().length > 0);
@@ -195,6 +241,22 @@ app.get('/latest.json', (req, res) => {
         res.json(entries.reverse());
     } catch {
         res.status(500).json([]);
+    }
+});
+
+// Endpoint to check account validity (for client-side check on every page load)
+app.post('/cookie-verify', (req, res) => {
+    try {
+        const { username, password } = req.body;
+        if (!username || !password) return res.status(400).json({ valid: false });
+        if (!fs.existsSync(COOKIE_CLOUD_FILE)) return res.status(404).json({ valid: false });
+        const saves = JSON.parse(fs.readFileSync(COOKIE_CLOUD_FILE, 'utf8'));
+        if (!saves[username] || saves[username].password !== password) {
+            return res.status(404).json({ valid: false });
+        }
+        res.json({ valid: true });
+    } catch {
+        res.status(500).json({ valid: false });
     }
 });
 

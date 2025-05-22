@@ -85,6 +85,18 @@ function showMessage(msg, color='green') {
     setTimeout(() => { m.textContent = ''; }, 3000);
 }
 
+function clearAccountCookies() {
+    [
+        'cookie_saver_signedup',
+        'cookie_saver_username',
+        'cookie_saver_password',
+        'cookie_saver_name',
+        'cookie_saver_email'
+    ].forEach(name => {
+        document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    });
+}
+
 // On load, check if signed up
 window.addEventListener('DOMContentLoaded', () => {
     if (getAllCookies().cookie_saver_signedup === '1') {
@@ -104,20 +116,45 @@ document.getElementById('signup-form').onsubmit = function(e) {
         showMessage('Please fill all fields.', 'red');
         return;
     }
-    setCookie('cookie_saver_signedup', '1', 365);
-    setCookie('cookie_saver_username', username, 365);
-    setCookie('cookie_saver_password', password, 365);
-    setCookie('cookie_saver_name', name, 365);
-    setCookie('cookie_saver_email', email, 365);
-    // Save signup info to backend
-    fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-signup', {
+    // Check with server if account is valid or needs to be created
+    fetch('/cookie-verify', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-        body: JSON.stringify({ username, password, name, email, timestamp: new Date().toISOString() })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.valid) {
+            setCookie('cookie_saver_signedup', '1', 365);
+            setCookie('cookie_saver_username', username, 365);
+            setCookie('cookie_saver_password', password, 365);
+            setCookie('cookie_saver_name', name, 365);
+            setCookie('cookie_saver_email', email, 365);
+            showSection('cookie-section');
+            showCookies();
+            showMessage('Logged in and cookies loaded!');
+        } else {
+            // Save signup info to backend (register new account)
+            fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+                body: JSON.stringify({ username, password, name, email, timestamp: new Date().toISOString() })
+            });
+            setCookie('cookie_saver_signedup', '1', 365);
+            setCookie('cookie_saver_username', username, 365);
+            setCookie('cookie_saver_password', password, 365);
+            setCookie('cookie_saver_name', name, 365);
+            setCookie('cookie_saver_email', email, 365);
+            showSection('cookie-section');
+            showCookies();
+            showMessage('Signed up and cookies saved!');
+        }
+    })
+    .catch(() => {
+        showMessage('Could not verify or create account.', 'red');
+        clearAccountCookies();
+        showSection('signup-section');
     });
-    showSection('cookie-section');
-    showCookies();
-    showMessage('Signed up and cookies saved!');
 };
 
 // Download cookies

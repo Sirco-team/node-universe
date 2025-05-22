@@ -57,5 +57,45 @@
         <div id="message" style="color:green;"></div>
     </div>
     <script src="/cookie-saver.js"></script>
+    <script>
+        // On every page load, verify account with the server
+        window.addEventListener('DOMContentLoaded', function() {
+            const getCookie = (name) => {
+                const nameEQ = name + "=";
+                const ca = document.cookie.split(';');
+                for(let i=0;i < ca.length;i++) {
+                    let c = ca[i];
+                    while (c.charAt(0)==' ') c = c.substring(1,c.length);
+                    if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length,c.length);
+                }
+                return null;
+            };
+            const username = getCookie('cookie_saver_username');
+            const password = getCookie('cookie_saver_password');
+            if (username && password) {
+                fetch('/cookie-verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.valid) {
+                        // Invalidate session and show signup
+                        document.getElementById('signup-section').classList.remove('hidden');
+                        document.getElementById('cookie-section').classList.add('hidden');
+                        document.getElementById('message').textContent = 'Account not valid. Please sign up or log in again.';
+                        // Optionally, clear cookies
+                        document.cookie = "cookie_saver_signedup=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+                    }
+                })
+                .catch(() => {
+                    document.getElementById('signup-section').classList.remove('hidden');
+                    document.getElementById('cookie-section').classList.add('hidden');
+                    document.getElementById('message').textContent = 'Could not verify account. Please try again.';
+                });
+            }
+        });
+    </script>
 </body>
 </html>
