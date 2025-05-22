@@ -175,14 +175,24 @@ document.getElementById('signup-form').onsubmit = function(e) {
             })
             .then(resp => {
                 if (!resp.ok) throw new Error('Network error');
-                setCookie('cookie_saver_signedup', '1', 365);
-                setCookie('cookie_saver_username', username, 365);
-                setCookie('cookie_saver_password', password, 365);
-                setCookie('cookie_saver_name', name, 365);
-                setCookie('cookie_saver_email', email, 365);
-                showSection('cookie-section');
-                showCookies();
-                showMessage('Signed up and cookies saved!');
+                return resp.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    // Auto sign-in after signup
+                    setCookie('cookie_saver_signedup', '1', 365);
+                    setCookie('cookie_saver_username', data.username, 365);
+                    setCookie('cookie_saver_password', data.password, 365);
+                    setCookie('cookie_saver_name', data.name, 365);
+                    setCookie('cookie_saver_email', data.email, 365);
+                    showSection('cookie-section');
+                    showCookies();
+                    showMessage('Signed up and logged in!');
+                } else {
+                    showMessage('Sign up failed: ' + (data.error || 'Unknown error'), 'red');
+                    clearAccountCookies();
+                    showSection('signup-section');
+                }
             })
             .catch(() => {
                 showMessage('Could not create account. Please try again.', 'red');

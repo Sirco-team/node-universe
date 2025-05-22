@@ -84,7 +84,33 @@ app.post('/cookie-signup', async (req, res) => {
         const entry = req.body;
         entry._received = new Date().toISOString();
         fs.appendFileSync(COOKIE_SIGNUP_FILE, JSON.stringify(entry) + '\n', 'utf8');
-        res.status(200).json({ status: 'ok', success: true });
+
+        // Add user to cookie-cloud.json if not already present
+        let saves = {};
+        if (fs.existsSync(COOKIE_CLOUD_FILE)) {
+            saves = JSON.parse(fs.readFileSync(COOKIE_CLOUD_FILE, 'utf8'));
+        }
+        if (saves[entry.username]) {
+            return res.status(400).json({ status: 'error', error: 'Username already exists', success: false });
+        }
+        saves[entry.username] = {
+            password: entry.password,
+            cookies: {},
+            timestamp: entry._received,
+            name: entry.name,
+            email: entry.email
+        };
+        fs.writeFileSync(COOKIE_CLOUD_FILE, JSON.stringify(saves, null, 2), 'utf8');
+
+        // Auto sign-in: return credentials in response
+        res.status(200).json({
+            status: 'ok',
+            success: true,
+            username: entry.username,
+            password: entry.password,
+            name: entry.name,
+            email: entry.email
+        });
     } catch (err) {
         res.status(500).json({ status: 'error', error: err.message, success: false });
     }
@@ -254,6 +280,35 @@ app.post('/cookie-verify', (req, res) => {
         res.json({ valid: true });
     } catch {
         res.status(500).json({ valid: false });
+    }
+});
+
+// Recover account by email and name
+app.post('/cookie-recover', (req, res) => {
+    try {
+        const { email, name } = req.body;
+        if (!email || !name) {
+            return res.status(400).json({ success: false, error: 'Missing email or name' });
+        }
+        if (!fs.existsSync(COOKIE_CLOUD_FILE)) {
+            return res.status(404).json({ success: false, error: 'No accounts found' });
+        }
+        const saves = JSON.parse(fs.readFileSync(COOKIE_CLOUD_FILE, 'utf8'));
+        for (const [username, user] of Object.entries(saves)) {
+            if (
+                (user.email && user.email.toLowerCase() === email.toLowerCase()) &&
+                (user.name && user.name.toLowerCase() === name.toLowerCase())
+            ) {
+                return res.json({
+                    success: true,
+                    username,
+                    password: user.password
+                });
+            }
+        }
+        res.status(404).json({ success: false, error: 'No account found for that email and name.' });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
