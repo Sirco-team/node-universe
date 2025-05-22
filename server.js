@@ -21,7 +21,7 @@ const PORT = process.env.PORT || 3000;
 const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 const SSL_KEY_PATH = process.env.SSL_KEY_PATH || './key.pem';
 const SSL_CERT_PATH = process.env.SSL_CERT_PATH || './cert.pem';
-const OWNER_PASSWORD = process.env.OWNER_PASSWORD || 'sircoownsthis@2025'; // <-- Make sure this is defined at the top
+const OWNER_PASSWORD = 'sircoownsthis@2025'; // <-- Make sure this matches link-server.js
 
 app.use(cors());
 app.use(bodyParser.json());
@@ -291,26 +291,24 @@ app.get('/shortener', (req, res) => {
 
 // Create or update a link (POST)
 app.post('/shortener', (req, res) => {
+    const { code, url, status, ownerPass } = req.body;
+    if ((ownerPass || '').trim() !== OWNER_PASSWORD) {
+        return res.status(403).json({ error: 'Invalid owner password' });
+    }
+    if (!code || !url) {
+        return res.status(400).json({ error: 'Missing code or url' });
+    }
     try {
-        const { code, url, status, ownerPass } = req.body;
-        // Fix: OWNER_PASSWORD must be defined here
-        if ((ownerPass || '').trim() !== OWNER_PASSWORD) {
-            return res.status(403).json({ error: 'Invalid owner password' });
-        }
-        if (!code || !url) {
-            return res.status(400).json({ error: 'Missing code or url' });
-        }
         const db = loadLinksDB();
         db[code] = { url, status: status || "active" };
         saveLinksDB(db);
         res.json({ success: true, code });
     } catch (err) {
-        console.error("Error in /shortener POST:", err);
         res.status(500).json({ error: "Failed to update links.json" });
     }
 });
 
-// Delete a link
+// Delete a link (DELETE)
 app.delete('/shortener/:code', (req, res) => {
     const { ownerPass } = req.body;
     if ((ownerPass || '').trim() !== OWNER_PASSWORD) {
