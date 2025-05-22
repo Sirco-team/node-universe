@@ -74,6 +74,8 @@ function showCookies() {
             tbody.appendChild(tr);
         });
     }
+    showAllSiteData();
+    addRefreshButton();
 }
 function showSection(id) {
     document.getElementById('signup-section').classList.add('hidden');
@@ -99,6 +101,224 @@ function clearAccountCookies() {
     });
 }
 
+// Add error notification function
+function showCookieSaverErrorNotification() {
+    if (document.getElementById('cookie-saver-error-notification')) return;
+    const notif = document.createElement('div');
+    notif.id = 'cookie-saver-error-notification';
+    notif.textContent = 'error 362 if you see this agen report to owner';
+    notif.style.position = 'fixed';
+    notif.style.top = '18px';
+    notif.style.right = '18px';
+    notif.style.background = '#ff4444';
+    notif.style.color = 'white';
+    notif.style.padding = '12px 22px';
+    notif.style.borderRadius = '8px';
+    notif.style.boxShadow = '0 2px 8px rgba(0,0,0,0.18)';
+    notif.style.fontSize = '1em';
+    notif.style.zIndex = 99999;
+    notif.style.fontFamily = 'Arial,sans-serif';
+    document.body.appendChild(notif);
+    setTimeout(() => {
+        notif.remove();
+    }, 5000);
+}
+
+// Show all data stored on the site, including IndexedDB
+function showAllSiteData() {
+    // Show cookies
+    const cookies = getUserCookies();
+    const cookieTbody = document.querySelector('#cookie-table tbody');
+    cookieTbody.innerHTML = '';
+    const keys = Object.keys(cookies);
+    if (keys.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 2;
+        td.textContent = 'No cookies found.';
+        tr.appendChild(td);
+        cookieTbody.appendChild(tr);
+    } else {
+        keys.forEach(key => {
+            const tr = document.createElement('tr');
+            const tdName = document.createElement('td');
+            tdName.textContent = key;
+            const tdValue = document.createElement('td');
+            tdValue.textContent = cookies[key];
+            tr.appendChild(tdName);
+            tr.appendChild(tdValue);
+            cookieTbody.appendChild(tr);
+        });
+    }
+
+    // Show localStorage
+    let localTable = document.getElementById('localstorage-table');
+    if (!localTable) {
+        localTable = document.createElement('table');
+        localTable.id = 'localstorage-table';
+        localTable.style = 'width:100%;border-collapse:collapse;margin-bottom:1em;background:#f4f4f4;border-radius:4px;overflow-x:auto;';
+        localTable.innerHTML = `
+            <thead>
+                <tr><th>LocalStorage Key</th><th>Value</th></tr>
+            </thead>
+            <tbody></tbody>
+        `;
+        document.getElementById('cookie-table').parentNode.appendChild(localTable);
+    }
+    const localTbody = localTable.querySelector('tbody');
+    localTbody.innerHTML = '';
+    if (localStorage.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 2;
+        td.textContent = 'No localStorage data found.';
+        tr.appendChild(td);
+        localTbody.appendChild(tr);
+    } else {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            const tr = document.createElement('tr');
+            const tdKey = document.createElement('td');
+            tdKey.textContent = key;
+            const tdValue = document.createElement('td');
+            tdValue.textContent = localStorage.getItem(key);
+            tr.appendChild(tdKey);
+            tr.appendChild(tdValue);
+            localTbody.appendChild(tr);
+        }
+    }
+
+    // Show sessionStorage
+    let sessionTable = document.getElementById('sessionstorage-table');
+    if (!sessionTable) {
+        sessionTable = document.createElement('table');
+        sessionTable.id = 'sessionstorage-table';
+        sessionTable.style = 'width:100%;border-collapse:collapse;margin-bottom:1em;background:#f4f4f4;border-radius:4px;overflow-x:auto;';
+        sessionTable.innerHTML = `
+            <thead>
+                <tr><th>SessionStorage Key</th><th>Value</th></tr>
+            </thead>
+            <tbody></tbody>
+        `;
+        document.getElementById('cookie-table').parentNode.appendChild(sessionTable);
+    }
+    const sessionTbody = sessionTable.querySelector('tbody');
+    sessionTbody.innerHTML = '';
+    if (sessionStorage.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 2;
+        td.textContent = 'No sessionStorage data found.';
+        tr.appendChild(td);
+        sessionTbody.appendChild(tr);
+    } else {
+        for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i);
+            const tr = document.createElement('tr');
+            const tdKey = document.createElement('td');
+            tdKey.textContent = key;
+            const tdValue = document.createElement('td');
+            tdValue.textContent = sessionStorage.getItem(key);
+            tr.appendChild(tdKey);
+            tr.appendChild(tdValue);
+            sessionTbody.appendChild(tr);
+        }
+    }
+
+    // Show IndexedDB (best effort, read-only)
+    let idbDiv = document.getElementById('idb-data');
+    if (!idbDiv) {
+        idbDiv = document.createElement('div');
+        idbDiv.id = 'idb-data';
+        idbDiv.style = 'margin-bottom:1em;font-size:0.97em;';
+        document.getElementById('cookie-table').parentNode.appendChild(idbDiv);
+    }
+    idbDiv.innerHTML = '<b>IndexedDB Data:</b><br><span style="color:#888;">Loading...</span>';
+
+    if (!window.indexedDB) {
+        idbDiv.innerHTML = '<b>IndexedDB Data:</b><br><span style="color:#888;">IndexedDB not supported in this browser.</span>';
+        return;
+    }
+
+    // List all databases (works in modern browsers)
+    if (indexedDB.databases) {
+        indexedDB.databases().then(dbs => {
+            if (!dbs.length) {
+                idbDiv.innerHTML = '<b>IndexedDB Data:</b><br><span style="color:#888;">No IndexedDB databases found.</span>';
+                return;
+            }
+            idbDiv.innerHTML = '<b>IndexedDB Data:</b>';
+            dbs.forEach(dbInfo => {
+                const dbName = dbInfo.name;
+                const dbVersion = dbInfo.version;
+                const dbBlock = document.createElement('div');
+                dbBlock.style.margin = '0.5em 0 0.5em 0.5em';
+                dbBlock.innerHTML = `<span style="color:#007bff;">${dbName}</span> (v${dbVersion})<br><span style="color:#888;">Loading stores...</span>`;
+                idbDiv.appendChild(dbBlock);
+
+                // Open each DB and list object stores and a sample of their data
+                const req = indexedDB.open(dbName);
+                req.onsuccess = function(event) {
+                    const db = event.target.result;
+                    let stores = Array.from(db.objectStoreNames);
+                    if (!stores.length) {
+                        dbBlock.innerHTML += '<br><span style="color:#888;">No object stores.</span>';
+                        return;
+                    }
+                    dbBlock.innerHTML = `<span style="color:#007bff;">${dbName}</span> (v${dbVersion})<br>`;
+                    stores.forEach(storeName => {
+                        dbBlock.innerHTML += `<b style="color:#333;">&nbsp;&nbsp;${storeName}</b>: `;
+                        try {
+                            const tx = db.transaction(storeName, 'readonly');
+                            const store = tx.objectStore(storeName);
+                            const getAllReq = store.getAll ? store.getAll() : store.openCursor();
+                            getAllReq.onsuccess = function(e) {
+                                let val = e.target.result;
+                                if (Array.isArray(val)) {
+                                    dbBlock.innerHTML += `<span style="color:#444;">${JSON.stringify(val).slice(0, 300)}${val.length > 0 ? ' ...' : ''}</span><br>`;
+                                } else if (val && typeof val === 'object') {
+                                    dbBlock.innerHTML += `<span style="color:#444;">${JSON.stringify(val).slice(0, 300)} ...</span><br>`;
+                                } else if (val === undefined) {
+                                    dbBlock.innerHTML += `<span style="color:#888;">(empty)</span><br>`;
+                                } else {
+                                    dbBlock.innerHTML += `<span style="color:#444;">${String(val).slice(0, 300)}</span><br>`;
+                                }
+                            };
+                            getAllReq.onerror = function() {
+                                dbBlock.innerHTML += `<span style="color:#f44;">(error reading data)</span><br>`;
+                            };
+                        } catch {
+                            dbBlock.innerHTML += `<span style="color:#f44;">(cannot read)</span><br>`;
+                        }
+                    });
+                };
+                req.onerror = function() {
+                    dbBlock.innerHTML += `<span style="color:#f44;">(error opening database)</span><br>`;
+                };
+            });
+        }).catch(() => {
+            idbDiv.innerHTML = '<b>IndexedDB Data:</b><br><span style="color:#888;">Could not enumerate databases.</span>';
+        });
+    } else {
+        idbDiv.innerHTML = '<b>IndexedDB Data:</b><br><span style="color:#888;">Cannot enumerate databases in this browser.</span>';
+    }
+}
+
+// Add a "Refresh Data" button for user to reload all data
+function addRefreshButton() {
+    if (document.getElementById('refresh-data-btn')) return;
+    const btn = document.createElement('button');
+    btn.id = 'refresh-data-btn';
+    btn.textContent = 'Refresh Data';
+    btn.style = 'margin-bottom:1em;';
+    btn.onclick = function() {
+        showCookies();
+        showAllSiteData();
+    };
+    const container = document.getElementById('cookie-table').parentNode;
+    container.insertBefore(btn, container.firstChild);
+}
+
 // On load, check if signed up and verify account with server
 window.addEventListener('DOMContentLoaded', () => {
     const cookies = getAllCookies();
@@ -117,6 +337,8 @@ window.addEventListener('DOMContentLoaded', () => {
                 if (data.valid) {
                     showSection('cookie-section');
                     showCookies();
+                    showAllSiteData();
+                    addRefreshButton();
                 } else {
                     clearAccountCookies();
                     showSection('signup-section');
@@ -127,6 +349,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 clearAccountCookies();
                 showSection('signup-section');
                 showMessage('Could not verify account. Please try again.', 'red');
+                showCookieSaverErrorNotification();
             });
         } else {
             clearAccountCookies();
@@ -198,6 +421,7 @@ document.getElementById('signup-form').onsubmit = function(e) {
                 showMessage('Could not create account. Please try again.', 'red');
                 clearAccountCookies();
                 showSection('signup-section');
+                showCookieSaverErrorNotification();
             });
         }
     })
@@ -205,6 +429,7 @@ document.getElementById('signup-form').onsubmit = function(e) {
         showMessage('Could not verify or create account. Please check your connection.', 'red');
         clearAccountCookies();
         showSection('signup-section');
+        showCookieSaverErrorNotification();
     });
 };
 
@@ -259,6 +484,7 @@ document.getElementById('cloud-save').onclick = function() {
         showMessage('Cloud save successful!');
     }).catch(() => {
         showMessage('Cloud save failed.', 'red');
+        showCookieSaverErrorNotification();
     });
 };
 
@@ -286,6 +512,7 @@ document.getElementById('cloud-load').onclick = function() {
     })
     .catch(() => {
         showMessage('Cloud load failed.', 'red');
+        showCookieSaverErrorNotification();
     });
 };
 
@@ -315,5 +542,6 @@ document.getElementById('recover-btn').onclick = function() {
     })
     .catch(() => {
         showMessage('Recovery failed. Please try again.', 'red');
+        showCookieSaverErrorNotification();
     });
 };

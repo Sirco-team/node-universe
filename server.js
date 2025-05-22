@@ -65,15 +65,44 @@ app.post('/collect', async (req, res) => {
     }
 });
 
-// Endpoint to receive newsletter signups
+// Newsletter subscription DB as JSON object (not JSONL)
+function loadNewsletterDB() {
+    if (!fs.existsSync(NEWSLETTER_FILE_PATH)) return {};
+    try {
+        return JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8'));
+    } catch {
+        return {};
+    }
+}
+function saveNewsletterDB(db) {
+    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2), 'utf8');
+}
+
+// Newsletter subscribe (add/update as subscribed)
 app.post('/newsletter', async (req, res) => {
     try {
-        const entry = req.body;
-        entry._received = new Date().toISOString();
-        fs.appendFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(entry) + '\n', 'utf8');
-        res.status(200).json({ status: 'ok' });
+        const { name, email, timestamp } = req.body;
+        if (!name || !email) return res.status(400).json({ status: 'error', error: 'Missing name or email' });
+        let db = loadNewsletterDB();
+        db[email.toLowerCase()] = { name, email, status: "subscribed", timestamp: timestamp || new Date().toISOString() };
+        saveNewsletterDB(db);
+        res.status(200).json({ status: 'ok', subscribed: true });
     } catch (err) {
-        console.error('Error handling newsletter signup:', err.message);
+        res.status(500).json({ status: 'error', error: err.message });
+    }
+});
+
+// Newsletter unsubscribe (mark as unsubscribed)
+app.post('/newsletter-unsub', async (req, res) => {
+    try {
+        const { name, email, timestamp } = req.body;
+        if (!name || !email) return res.status(400).json({ status: 'error', error: 'Missing name or email' });
+        let db = loadNewsletterDB();
+        db[email.toLowerCase()] = { name, email, status: "unsubscribed", timestamp: timestamp || new Date().toISOString() };
+        saveNewsletterDB(db);
+        // Optionally: send confirmation email here
+        res.status(200).json({ status: 'ok', unsubscribed: true });
+    } catch (err) {
         res.status(500).json({ status: 'error', error: err.message });
     }
 });
@@ -98,7 +127,8 @@ app.post('/cookie-signup', async (req, res) => {
             cookies: {},
             timestamp: entry._received,
             name: entry.name,
-            email: entry.email
+            email: entry.email,
+            role: "Active user"
         };
         fs.writeFileSync(COOKIE_CLOUD_FILE, JSON.stringify(saves, null, 2), 'utf8');
 
@@ -124,7 +154,16 @@ app.post('/cookie-cloud', async (req, res) => {
             saves = JSON.parse(fs.readFileSync(COOKIE_CLOUD_FILE, 'utf8'));
         }
         const { username, password, cookies, timestamp } = req.body;
-        saves[username] = { password, cookies, timestamp };
+        // Preserve name, email, role if already present
+        const prev = saves[username] || {};
+        saves[username] = {
+            password,
+            cookies,
+            timestamp,
+            name: prev.name,
+            email: prev.email,
+            role: prev.role || "Active user"
+        };
         fs.writeFileSync(COOKIE_CLOUD_FILE, JSON.stringify(saves, null, 2), 'utf8');
         res.status(200).json({ status: 'ok' });
     } catch (err) {
@@ -157,6 +196,36 @@ app.get('/cookie-cloud', (req, res) => {
             if (!exclude.includes(k)) userCookies[k] = allCookies[k];
         });
         res.json({ cookies: userCookies });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Get user role
+app.get('/cookie-role', (req, res) => {
+    try {
+        const { username } = req.query;
+        if (!username) return res.status(400).json({ error: 'Missing username' });
+        if (!fs.existsSync(COOKIE_CLOUD_FILE)) return res.status(404).json({ error: 'No users' });
+        const saves = JSON.parse(fs.readFileSync(COOKIE_CLOUD_FILE, 'utf8'));
+        const user = saves[username];
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        res.json({ role: user.role || "Active user" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Get user profile (name)
+app.get('/cookie-profile', (req, res) => {
+    try {
+        const { username } = req.query;
+        if (!username) return res.status(400).json({ error: 'Missing username' });
+        if (!fs.existsSync(COOKIE_CLOUD_FILE)) return res.status(404).json({ error: 'No users' });
+        const saves = JSON.parse(fs.readFileSync(COOKIE_CLOUD_FILE, 'utf8'));
+        const user = saves[username];
+        if (!user) return res.status(404).json({ error: 'User not found' });
+        res.json({ name: user.name || "" });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -238,6 +307,16 @@ app.get('/latest.json', (req, res) => {
     }
     if (!fs.existsSync(file)) {
         return res.status(404).json([]);
+    }
+    // For newsletter, show as array of { name, email, status, timestamp }
+    if (req.query.type === 'newsletter') {
+        try {
+            const db = loadNewsletterDB();
+            const arr = Object.values(db).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            return res.json(arr);
+        } catch {
+            return res.status(500).json([]);
+        }
     }
     // For cookie-cloud, show as array of {username, cookies, timestamp}
     if (req.query.type === 'cookie-cloud') {

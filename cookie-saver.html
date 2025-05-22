@@ -80,6 +80,7 @@
                     </tbody>
                 </table>
             </div>
+            <button id="refresh-cookies">Refresh Cookies</button>
             <button id="download-cookies">Download Cookies</button>
             <button id="cloud-save">Export to Cloud</button>
             <button id="cloud-load">Import from Cloud</button>
@@ -91,7 +92,7 @@
     </div>
     <script src="/cookie-saver.js"></script>
     <script>
-        // On every page load, verify account with the server (only if not already signed in)
+        // Redirect to account page if not signed in
         window.addEventListener('DOMContentLoaded', function() {
             const getCookie = (name) => {
                 const nameEQ = name + "=";
@@ -105,8 +106,28 @@
             };
             const username = getCookie('cookie_saver_username');
             const password = getCookie('cookie_saver_password');
-            // Only check if not already in cookie-section
-            if (username && password && document.getElementById('cookie-section').classList.contains('hidden')) {
+            const signedup = getCookie('cookie_saver_signedup');
+            if (!(username && password && signedup === '1')) {
+                // Not signed in, show message and redirect after 2 seconds
+                document.body.innerHTML = `
+                    <div style="max-width:400px;margin:5em auto;padding:2em;background:#fff;border-radius:8px;box-shadow:0 2px 8px #0001;text-align:center;">
+                        <h2>Sign In Required</h2>
+                        <p>You must <a href="/CODE/account" style="color:#007bff;text-decoration:underline;">login or make an account here</a> to use the Cookie Saver & Exporter.</p>
+                        <p>Redirecting to account page...</p>
+                    </div>
+                `;
+                setTimeout(function() {
+                    window.location.href = "/CODE/account";
+                }, 2000);
+                return;
+            }
+            // If already logged in, show cookie section immediately
+            if (username && password && signedup === '1') {
+                hideAllSections();
+                document.getElementById('cookie-section').classList.remove('hidden');
+                if (typeof showCookies === "function") showCookies();
+            } else if (username && password && document.getElementById('cookie-section').classList.contains('hidden')) {
+                // Only check if not already in cookie-section
                 fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-verify', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -414,6 +435,11 @@
                 }
             };
             reader.readAsText(file);
+        };
+
+        // Add this after other event listeners in the script tag:
+        document.getElementById('refresh-cookies').onclick = function() {
+            if (typeof showCookies === "function") showCookies();
         };
     </script>
 </body>
