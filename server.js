@@ -84,9 +84,9 @@ app.post('/cookie-signup', async (req, res) => {
         const entry = req.body;
         entry._received = new Date().toISOString();
         fs.appendFileSync(COOKIE_SIGNUP_FILE, JSON.stringify(entry) + '\n', 'utf8');
-        res.status(200).json({ status: 'ok' });
+        res.status(200).json({ status: 'ok', success: true });
     } catch (err) {
-        res.status(500).json({ status: 'error', error: err.message });
+        res.status(500).json({ status: 'error', error: err.message, success: false });
     }
 });
 
@@ -196,7 +196,6 @@ app.get('/latest', (req, res) => {
 
 // Serve all analytics, newsletter, cookie signups, or cloud saves as JSON for AJAX polling
 app.get('/latest.json', (req, res) => {
-    // Remove the 'n' parameter, always show all
     let file;
     switch (req.query.type) {
         case 'newsletter':
