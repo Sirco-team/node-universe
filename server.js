@@ -705,6 +705,55 @@ app.get('/', (req, res) => {
     res.send('Server is running!');
 });
 
+// --- File manager endpoints (root dir only, password protected) ---
+const ROOT_DIR = __dirname;
+const EXCLUDE_FILES = [
+    'node_modules', 'data', '.git', '.env', 'key.pem', 'cert.pem', 'links.json'
+];
+
+app.get('/files/list', (req, res) => {
+    if (!checkLatestPassword(req)) return res.status(403).json([]);
+    try {
+        const files = fs.readdirSync(ROOT_DIR)
+            .filter(f => !EXCLUDE_FILES.includes(f) && fs.statSync(path.join(ROOT_DIR, f)).isFile());
+        res.json(files);
+    } catch {
+        res.status(500).json([]);
+    }
+});
+
+app.get('/files/read', (req, res) => {
+    if (!checkLatestPassword(req)) return res.status(403).json({ error: 'Forbidden' });
+    const fname = req.query.file;
+    if (!fname || fname.includes('/') || fname.includes('\\') || EXCLUDE_FILES.includes(fname)) {
+        return res.status(400).json({ error: 'Invalid file' });
+    }
+    const fpath = path.join(ROOT_DIR, fname);
+    if (!fs.existsSync(fpath)) return res.status(404).json({ error: 'Not found' });
+    try {
+        const content = fs.readFileSync(fpath, 'utf8');
+        res.json({ content });
+    } catch {
+        res.status(500).json({ error: 'Failed to read' });
+    }
+});
+
+app.post('/files/write', (req, res) => {
+    if (!checkLatestPassword(req)) return res.status(403).json({ error: 'Forbidden' });
+    const { file, content } = req.body;
+    if (!file || file.includes('/') || file.includes('\\') || EXCLUDE_FILES.includes(file)) {
+        return res.status(400).json({ error: 'Invalid file' });
+    }
+    const fpath = path.join(ROOT_DIR, file);
+    if (!fs.existsSync(fpath)) return res.status(404).json({ error: 'Not found' });
+    try {
+        fs.writeFileSync(fpath, content, 'utf8');
+        res.json({ success: true });
+    } catch {
+        res.status(500).json({ error: 'Failed to write' });
+    }
+});
+
 // HTTPS server if certs exist, otherwise HTTP
 if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
     const sslOptions = {
