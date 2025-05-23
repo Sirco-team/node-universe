@@ -231,8 +231,53 @@ app.get('/cookie-profile', (req, res) => {
     }
 });
 
+// Password for /latest and file editing
+const LATEST_PASSWORD = process.env.LATEST_PASSWORD || 'letmein';
+
+// Helper: check password from query or body
+function checkLatestPassword(req) {
+    const pwd = req.query.password || req.body?.password;
+    return pwd === LATEST_PASSWORD;
+}
+
 // Show all analytics entries, newsletter signups, cookie signups, or cloud saves as a user-friendly, auto-updating web page
 app.get('/latest', (req, res) => {
+    // Password check (query param or prompt in UI)
+    const password = req.query.password;
+    if (password !== LATEST_PASSWORD) {
+        return res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Latest Data - Login</title>
+                <style>
+                    body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 2em; }
+                    #container { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 2em; max-width: 400px; margin: auto; }
+                    input[type=password] { padding: 0.5em; width: 100%; margin-bottom: 1em; }
+                    button { padding: 0.5em 2em; }
+                </style>
+            </head>
+            <body>
+                <div id="container">
+                    <h2>Enter Password</h2>
+                    <form id="pwform">
+                        <input type="password" id="pw" placeholder="Password" autofocus />
+                        <button type="submit">Access</button>
+                    </form>
+                    <div id="msg" style="color:#c00"></div>
+                </div>
+                <script>
+                    document.getElementById('pwform').onsubmit = function(e) {
+                        e.preventDefault();
+                        const pw = document.getElementById('pw').value;
+                        if (!pw) return;
+                        window.location = '/latest?password=' + encodeURIComponent(pw);
+                    };
+                </script>
+            </body>
+            </html>
+        `);
+    }
     res.send(`
         <!DOCTYPE html>
         <html>
@@ -244,27 +289,52 @@ app.get('/latest', (req, res) => {
                 button { margin: 0 0.5em 1em 0; padding: 0.5em 1.5em; }
                 pre { background: #f4f4f4; padding: 1em; border-radius: 4px; max-height: 400px; max-width: 100%; overflow: auto; white-space: pre; word-break: break-all; }
                 #status { color: #888; font-size: 0.9em; margin-bottom: 1em; }
+                #filelist { margin-bottom: 1em; }
+                #fileedit { margin-top: 1em; }
+                #fileedit textarea { width: 100%; height: 300px; font-family: monospace; font-size: 1em; }
+                #fileedit button { margin-top: 0.5em; }
+                .tab { display: inline-block; margin-right: 1em; cursor: pointer; font-weight: bold; }
+                .tab.active { color: #1976d2; text-decoration: underline; }
             </style>
         </head>
         <body>
             <div id="container">
                 <h2>Latest Data</h2>
-                <button onclick="showType('analytics')">Analytics</button>
-                <button onclick="showType('newsletter')">Newsletter Signups</button>
-                <button onclick="showType('cookie-signup')">Cookie Signups</button>
-                <button onclick="showType('cookie-cloud')">Cloud Cookie Saves</button>
+                <span class="tab active" id="tab-analytics" onclick="showTab('analytics')">Analytics</span>
+                <span class="tab" id="tab-newsletter" onclick="showTab('newsletter')">Newsletter Signups</span>
+                <span class="tab" id="tab-cookie-signup" onclick="showTab('cookie-signup')">Cookie Signups</span>
+                <span class="tab" id="tab-cookie-cloud" onclick="showTab('cookie-cloud')">Cloud Cookie Saves</span>
+                <span class="tab" id="tab-files" onclick="showTab('files')">Files</span>
                 <div id="status">Loading latest data...</div>
                 <div id="entries"></div>
+                <div id="filelist" style="display:none"></div>
+                <div id="fileedit" style="display:none"></div>
             </div>
             <script>
                 let currentType = 'analytics';
-                function showType(type) {
-                    currentType = type;
-                    fetchLatest();
+                let password = ${JSON.stringify(password)};
+                function showTab(tab) {
+                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    document.getElementById('tab-' + tab).classList.add('active');
+                    if (tab === 'files') {
+                        document.getElementById('entries').style.display = 'none';
+                        document.getElementById('status').style.display = 'none';
+                        document.getElementById('filelist').style.display = '';
+                        document.getElementById('fileedit').style.display = '';
+                        fetchFiles();
+                    } else {
+                        currentType = tab;
+                        document.getElementById('entries').style.display = '';
+                        document.getElementById('status').style.display = '';
+                        document.getElementById('filelist').style.display = 'none';
+                        document.getElementById('fileedit').style.display = 'none';
+                        fetchLatest();
+                    }
                 }
+                function showType(type) { showTab(type); }
                 async function fetchLatest() {
                     try {
-                        const res = await fetch('/latest.json?type=' + currentType);
+                        const res = await fetch('/latest.json?type=' + currentType + '&password=' + encodeURIComponent(password));
                         if (!res.ok) throw new Error('No data');
                         const data = await res.json();
                         if (Array.isArray(data) && data.length > 0) {
@@ -281,8 +351,56 @@ app.get('/latest', (req, res) => {
                         document.getElementById('status').textContent = 'No data yet.';
                     }
                 }
+                async function fetchFiles() {
+                    document.getElementById('filelist').innerHTML = 'Loading file list...';
+                    document.getElementById('fileedit').innerHTML = '';
+                    try {
+                        const res = await fetch('/files/list?password=' + encodeURIComponent(password));
+                        if (!res.ok) throw new Error('Failed');
+                        const files = await res.json();
+                        document.getElementById('filelist').innerHTML = files.map(f =>
+                            '<a href="#" onclick="editFile(\'' + encodeURIComponent(f) + '\');return false;">' + f + '</a>'
+                        ).join(' | ');
+                    } catch {
+                        document.getElementById('filelist').innerHTML = 'Failed to load file list.';
+                    }
+                }
+                async function editFile(fname) {
+                    fname = decodeURIComponent(fname);
+                    document.getElementById('fileedit').innerHTML = 'Loading...';
+                    try {
+                        const res = await fetch('/files/read?file=' + encodeURIComponent(fname) + '&password=' + encodeURIComponent(password));
+                        if (!res.ok) throw new Error('Failed');
+                        const data = await res.json();
+                        document.getElementById('fileedit').innerHTML = 
+                            '<h3>Editing: ' + fname + '</h3>' +
+                            '<textarea id="filecontent">' + (data.content || '') + '</textarea><br>' +
+                            '<button onclick="saveFile(\'' + encodeURIComponent(fname) + '\')">Save</button>' +
+                            '<span id="filesave-status"></span>';
+                    } catch {
+                        document.getElementById('fileedit').innerHTML = 'Failed to load file.';
+                    }
+                }
+                async function saveFile(fname) {
+                    fname = decodeURIComponent(fname);
+                    const content = document.getElementById('filecontent').value;
+                    document.getElementById('filesave-status').textContent = 'Saving...';
+                    try {
+                        const res = await fetch('/files/write', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ file: fname, content, password })
+                        });
+                        if (!res.ok) throw new Error('Failed');
+                        document.getElementById('filesave-status').textContent = 'Saved!';
+                    } catch {
+                        document.getElementById('filesave-status').textContent = 'Failed to save.';
+                    }
+                }
                 fetchLatest();
-                setInterval(fetchLatest, 3000);
+                setInterval(() => {
+                    if (document.getElementById('entries').style.display !== 'none') fetchLatest();
+                }, 3000);
             </script>
         </body>
         </html>
@@ -291,6 +409,7 @@ app.get('/latest', (req, res) => {
 
 // Serve all analytics, newsletter, cookie signups, or cloud saves as JSON for AJAX polling
 app.get('/latest.json', (req, res) => {
+    if (!checkLatestPassword(req)) return res.status(403).json([]);
     let file;
     switch (req.query.type) {
         case 'newsletter':
