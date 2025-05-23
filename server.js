@@ -435,7 +435,7 @@ app.get('/latest', (req, res) => {
             <script>
                 let currentType = 'analytics';
                 function setActiveTab(tab) {
-                    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
                     tab.classList.add('active');
                 }
                 function showTab(tabType) {
@@ -454,11 +454,17 @@ app.get('/latest', (req, res) => {
                         fetchLatest();
                     }
                 }
-                document.querySelectorAll('.tab').forEach(tab => {
-                    tab.onclick = function() {
-                        setActiveTab(tab);
-                        showTab(tab.getAttribute('data-type'));
-                    };
+                document.addEventListener('DOMContentLoaded', function() {
+                    document.querySelectorAll('.tab').forEach(function(tab) {
+                        tab.onclick = function() {
+                            setActiveTab(tab);
+                            showTab(tab.getAttribute('data-type'));
+                        };
+                    });
+                    fetchLatest();
+                    setInterval(function() {
+                        if (document.getElementById('entries').style.display !== 'none') fetchLatest();
+                    }, 3000);
                 });
                 async function fetchLatest() {
                     try {
@@ -466,9 +472,9 @@ app.get('/latest', (req, res) => {
                         if (!res.ok) throw new Error('No data');
                         const data = await res.json();
                         if (Array.isArray(data) && data.length > 0) {
-                            document.getElementById('entries').innerHTML = data.map(entry =>
-                                '<pre>' + JSON.stringify(entry, null, 2) + '</pre>'
-                            ).join('');
+                            document.getElementById('entries').innerHTML = data.map(function(entry) {
+                                return '<pre>' + JSON.stringify(entry, null, 2) + '</pre>';
+                            }).join('');
                             document.getElementById('status').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
                         } else {
                             document.getElementById('entries').innerHTML = '';
@@ -486,30 +492,30 @@ app.get('/latest', (req, res) => {
                         const res = await fetch('/files/list', { credentials: 'same-origin' });
                         if (!res.ok) throw new Error('Failed');
                         const files = await res.json();
-                        document.getElementById('filelist').innerHTML = files.map(f =>
-                            '<a href="#" onclick="editFile(\'' + encodeURIComponent(f) + '\');return false;">' + f + '</a>'
-                        ).join(' | ');
+                        document.getElementById('filelist').innerHTML = files.map(function(f) {
+                            return '<a href="#" onclick="editFile(\\'' + encodeURIComponent(f) + '\\');return false;">' + f + '</a>';
+                        }).join(' | ');
                     } catch {
                         document.getElementById('filelist').innerHTML = 'Failed to load file list.';
                     }
                 }
-                async function editFile(fname) {
+                window.editFile = async function(fname) {
                     fname = decodeURIComponent(fname);
                     document.getElementById('fileedit').innerHTML = 'Loading...';
                     try {
                         const res = await fetch('/files/read?file=' + encodeURIComponent(fname), { credentials: 'same-origin' });
                         if (!res.ok) throw new Error('Failed');
                         const data = await res.json();
-                        document.getElementById('fileedit').innerHTML = 
+                        document.getElementById('fileedit').innerHTML =
                             '<h3>Editing: ' + fname + '</h3>' +
                             '<textarea id="filecontent">' + (data.content || '') + '</textarea><br>' +
-                            '<button onclick="saveFile(\'' + encodeURIComponent(fname) + '\')">Save</button>' +
+                            '<button onclick="window.saveFile(\\'' + encodeURIComponent(fname) + '\\')">Save</button>' +
                             '<span id="filesave-status"></span>';
                     } catch {
                         document.getElementById('fileedit').innerHTML = 'Failed to load file.';
                     }
                 }
-                async function saveFile(fname) {
+                window.saveFile = async function(fname) {
                     fname = decodeURIComponent(fname);
                     const content = document.getElementById('filecontent').value;
                     document.getElementById('filesave-status').textContent = 'Saving...';
@@ -526,13 +532,6 @@ app.get('/latest', (req, res) => {
                         document.getElementById('filesave-status').textContent = 'Failed to save.';
                     }
                 }
-                // Initial load
-                fetchLatest();
-                // Polling
-                setInterval(() => {
-                    // Only poll if not in files tab
-                    if (document.getElementById('entries').style.display !== 'none') fetchLatest();
-                }, 3000);
             </script>
         </body>
         </html>
