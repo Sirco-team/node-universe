@@ -493,7 +493,7 @@ app.get('/latest', (req, res) => {
                         if (!res.ok) throw new Error('Failed');
                         const files = await res.json();
                         document.getElementById('filelist').innerHTML = files.map(function(f) {
-                            return '<a href="#" onclick="editFile(\\'' + encodeURIComponent(f) + '\\');return false;">' + f + '</a>';
+                            return '<a href="#" onclick="window.editFile(\'' + encodeURIComponent(f) + '\');return false;">' + f + '</a>';
                         }).join(' | ');
                     } catch {
                         document.getElementById('filelist').innerHTML = 'Failed to load file list.';
@@ -506,10 +506,22 @@ app.get('/latest', (req, res) => {
                         const res = await fetch('/files/read?file=' + encodeURIComponent(fname), { credentials: 'same-origin' });
                         if (!res.ok) throw new Error('Failed');
                         const data = await res.json();
+                        // Escape HTML for textarea
+                        function escapeHtml(text) {
+                            return text.replace(/[&<>"']/g, function(m) {
+                                return ({
+                                    '&': '&amp;',
+                                    '<': '&lt;',
+                                    '>': '&gt;',
+                                    '"': '&quot;',
+                                    "'": '&#39;'
+                                })[m];
+                            });
+                        }
                         document.getElementById('fileedit').innerHTML =
                             '<h3>Editing: ' + fname + '</h3>' +
-                            '<textarea id="filecontent">' + (data.content || '') + '</textarea><br>' +
-                            '<button onclick="window.saveFile(\\'' + encodeURIComponent(fname) + '\\')">Save</button>' +
+                            '<textarea id="filecontent">' + (data.content ? escapeHtml(data.content) : '') + '</textarea><br>' +
+                            '<button onclick="window.saveFile(\'' + encodeURIComponent(fname) + '\')">Save</button>' +
                             '<span id="filesave-status"></span>';
                     } catch {
                         document.getElementById('fileedit').innerHTML = 'Failed to load file.';
