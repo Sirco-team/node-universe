@@ -521,11 +521,14 @@ app.get('/latest', (req, res) => {
                         document.getElementById('fileedit').innerHTML =
                             '<h3>Editing: ' + fname + '</h3>' +
                             '<textarea id="filecontent">' + (data.content ? escapeHtml(data.content) : '') + '</textarea><br>' +
-                            '<button id="savefilebtn">Save</button>' +
+                            '<button id="savefilebtn" type="button">Save</button>' +
                             '<span id="filesave-status"></span>';
-                        document.getElementById('savefilebtn').onclick = function() {
-                            window.saveFile(encodeURIComponent(fname));
-                        };
+                        // Attach event handler after DOM is updated
+                        setTimeout(function() {
+                            document.getElementById('savefilebtn').onclick = function() {
+                                window.saveFile(fname);
+                            };
+                        }, 0);
                     } catch {
                         document.getElementById('fileedit').innerHTML = 'Failed to load file.';
                     }
