@@ -422,11 +422,11 @@ app.get('/latest', (req, res) => {
         <body>
             <div id="container">
                 <h2>Latest Data</h2>
-                <span class="tab active" id="tab-analytics" data-type="analytics">Analytics</span>
-                <span class="tab" id="tab-newsletter" data-type="newsletter">Newsletter Signups</span>
-                <span class="tab" id="tab-cookie-signup" data-type="cookie-signup">Cookie Signups</span>
-                <span class="tab" id="tab-cookie-cloud" data-type="cookie-cloud">Cloud Cookie Saves</span>
-                <span class="tab" id="tab-files" data-type="files">Files</span>
+                <span class="tab active" data-type="analytics">Analytics</span>
+                <span class="tab" data-type="newsletter">Newsletter Signups</span>
+                <span class="tab" data-type="cookie-signup">Cookie Signups</span>
+                <span class="tab" data-type="cookie-cloud">Cloud Cookie Saves</span>
+                <span class="tab" data-type="files">Files</span>
                 <div id="status">Loading latest data...</div>
                 <div id="entries"></div>
                 <div id="filelist" style="display:none"></div>
@@ -462,7 +462,7 @@ app.get('/latest', (req, res) => {
                 });
                 async function fetchLatest() {
                     try {
-                        const res = await fetch('/latest.json?type=' + currentType, { credentials: 'same-origin' });
+                        const res = await fetch('/latest.json?type=' + encodeURIComponent(currentType), { credentials: 'same-origin' });
                         if (!res.ok) throw new Error('No data');
                         const data = await res.json();
                         if (Array.isArray(data) && data.length > 0) {
@@ -526,8 +526,11 @@ app.get('/latest', (req, res) => {
                         document.getElementById('filesave-status').textContent = 'Failed to save.';
                     }
                 }
+                // Initial load
                 fetchLatest();
+                // Polling
                 setInterval(() => {
+                    // Only poll if not in files tab
                     if (document.getElementById('entries').style.display !== 'none') fetchLatest();
                 }, 3000);
             </script>
