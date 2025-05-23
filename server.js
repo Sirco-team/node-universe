@@ -5,6 +5,7 @@ const bodyParser = require('body-parser');
 const fs = require('fs');
 const https = require('https');
 const path = require('path');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 
@@ -25,6 +26,7 @@ const OWNER_PASSWORD = 'sircoownsthis@2025'; // <-- Make sure this matches link-
 
 app.use(cors());
 app.use(bodyParser.json());
+app.use(cookieParser());
 
 // Explicitly handle preflight OPTIONS requests for all routes
 app.options('*', cors());
@@ -334,18 +336,28 @@ app.get('/cookie-profile', (req, res) => {
 
 // Password for /latest and file editing
 const LATEST_PASSWORD = process.env.LATEST_PASSWORD || 'letmein';
+const LATEST_COOKIE = 'latest_auth';
 
-// Helper: check password from query or body
+// Helper: check password from query, body, or cookie
 function checkLatestPassword(req) {
-    const pwd = req.query.password || req.body?.password;
+    const pwd = req.body?.password || req.query?.password || req.cookies?.[LATEST_COOKIE];
     return pwd === LATEST_PASSWORD;
 }
 
+// Password auth endpoint for /latest (POST)
+app.post('/latest-auth', (req, res) => {
+    const { password } = req.body;
+    if (password === LATEST_PASSWORD) {
+        res.cookie(LATEST_COOKIE, password, { httpOnly: true, sameSite: 'lax' });
+        return res.json({ ok: true });
+    }
+    res.status(401).json({ ok: false });
+});
+
 // Show all analytics entries, newsletter signups, cookie signups, or cloud saves as a user-friendly, auto-updating web page
 app.get('/latest', (req, res) => {
-    // Password check (query param or prompt in UI)
-    const password = req.query.password;
-    if (password !== LATEST_PASSWORD) {
+    // Check cookie for password
+    if (req.cookies?.[LATEST_COOKIE] !== LATEST_PASSWORD) {
         return res.send(`
             <!DOCTYPE html>
             <html>
@@ -361,18 +373,27 @@ app.get('/latest', (req, res) => {
             <body>
                 <div id="container">
                     <h2>Enter Password</h2>
-                    <form id="pwform">
-                        <input type="password" id="pw" placeholder="Password" autofocus />
+                    <form id="pwform" autocomplete="off">
+                        <input type="password" id="pw" placeholder="Password" autofocus autocomplete="off" />
                         <button type="submit">Access</button>
                     </form>
                     <div id="msg" style="color:#c00"></div>
                 </div>
                 <script>
-                    document.getElementById('pwform').onsubmit = function(e) {
+                    document.getElementById('pwform').onsubmit = async function(e) {
                         e.preventDefault();
                         const pw = document.getElementById('pw').value;
                         if (!pw) return;
-                        window.location = '/latest?password=' + encodeURIComponent(pw);
+                        const res = await fetch('/latest-auth', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ password: pw })
+                        });
+                        if (res.ok) {
+                            window.location.reload();
+                        } else {
+                            document.getElementById('msg').textContent = 'Wrong password.';
+                        }
                     };
                 </script>
             </body>
@@ -401,11 +422,11 @@ app.get('/latest', (req, res) => {
         <body>
             <div id="container">
                 <h2>Latest Data</h2>
-                <span class="tab active" id="tab-analytics" onclick="showTab('analytics')">Analytics</span>
-                <span class="tab" id="tab-newsletter" onclick="showTab('newsletter')">Newsletter Signups</span>
-                <span class="tab" id="tab-cookie-signup" onclick="showTab('cookie-signup')">Cookie Signups</span>
-                <span class="tab" id="tab-cookie-cloud" onclick="showTab('cookie-cloud')">Cloud Cookie Saves</span>
-                <span class="tab" id="tab-files" onclick="showTab('files')">Files</span>
+                <span class="tab active" id="tab-analytics" data-type="analytics">Analytics</span>
+                <span class="tab" id="tab-newsletter" data-type="newsletter">Newsletter Signups</span>
+                <span class="tab" id="tab-cookie-signup" data-type="cookie-signup">Cookie Signups</span>
+                <span class="tab" id="tab-cookie-cloud" data-type="cookie-cloud">Cloud Cookie Saves</span>
+                <span class="tab" id="tab-files" data-type="files">Files</span>
                 <div id="status">Loading latest data...</div>
                 <div id="entries"></div>
                 <div id="filelist" style="display:none"></div>
@@ -413,18 +434,19 @@ app.get('/latest', (req, res) => {
             </div>
             <script>
                 let currentType = 'analytics';
-                let password = ${JSON.stringify(password)};
-                function showTab(tab) {
+                function setActiveTab(tab) {
                     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                    document.getElementById('tab-' + tab).classList.add('active');
-                    if (tab === 'files') {
+                    tab.classList.add('active');
+                }
+                function showTab(tabType) {
+                    currentType = tabType;
+                    if (tabType === 'files') {
                         document.getElementById('entries').style.display = 'none';
                         document.getElementById('status').style.display = 'none';
                         document.getElementById('filelist').style.display = '';
                         document.getElementById('fileedit').style.display = '';
                         fetchFiles();
                     } else {
-                        currentType = tab;
                         document.getElementById('entries').style.display = '';
                         document.getElementById('status').style.display = '';
                         document.getElementById('filelist').style.display = 'none';
@@ -432,10 +454,15 @@ app.get('/latest', (req, res) => {
                         fetchLatest();
                     }
                 }
-                function showType(type) { showTab(type); }
+                document.querySelectorAll('.tab').forEach(tab => {
+                    tab.onclick = function() {
+                        setActiveTab(tab);
+                        showTab(tab.getAttribute('data-type'));
+                    };
+                });
                 async function fetchLatest() {
                     try {
-                        const res = await fetch('/latest.json?type=' + currentType + '&password=' + encodeURIComponent(password));
+                        const res = await fetch('/latest.json?type=' + currentType, { credentials: 'same-origin' });
                         if (!res.ok) throw new Error('No data');
                         const data = await res.json();
                         if (Array.isArray(data) && data.length > 0) {
@@ -456,7 +483,7 @@ app.get('/latest', (req, res) => {
                     document.getElementById('filelist').innerHTML = 'Loading file list...';
                     document.getElementById('fileedit').innerHTML = '';
                     try {
-                        const res = await fetch('/files/list?password=' + encodeURIComponent(password));
+                        const res = await fetch('/files/list', { credentials: 'same-origin' });
                         if (!res.ok) throw new Error('Failed');
                         const files = await res.json();
                         document.getElementById('filelist').innerHTML = files.map(f =>
@@ -470,7 +497,7 @@ app.get('/latest', (req, res) => {
                     fname = decodeURIComponent(fname);
                     document.getElementById('fileedit').innerHTML = 'Loading...';
                     try {
-                        const res = await fetch('/files/read?file=' + encodeURIComponent(fname) + '&password=' + encodeURIComponent(password));
+                        const res = await fetch('/files/read?file=' + encodeURIComponent(fname), { credentials: 'same-origin' });
                         if (!res.ok) throw new Error('Failed');
                         const data = await res.json();
                         document.getElementById('fileedit').innerHTML = 
@@ -490,7 +517,8 @@ app.get('/latest', (req, res) => {
                         const res = await fetch('/files/write', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ file: fname, content, password })
+                            credentials: 'same-origin',
+                            body: JSON.stringify({ file: fname, content })
                         });
                         if (!res.ok) throw new Error('Failed');
                         document.getElementById('filesave-status').textContent = 'Saved!';
