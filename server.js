@@ -319,31 +319,58 @@ app.post('/unban-ip', (req, res) => {
     res.json({ success: true, banned });
 });
 
-// Apply bannedIPMiddleware to signup/account creation endpoints
-app.post('/cookie-signup', bannedIPMiddleware, (req, res, next) => {
-    const data = { ...req.body, timestamp: new Date().toISOString() };
-    // Save creation_ip
-    if (!data.creation_ip) {
-        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
-        data.creation_ip = ip;
+// --- Cookie Cloud Save/Load endpoints ---
+app.post('/cookie-cloud', (req, res) => {
+    const { username, password, cookies, timestamp } = req.body || {};
+    if (!username || !password || !cookies) {
+        return res.status(400).json({ error: 'Missing required fields' });
     }
-    // Save to DB (example: newsletter-signups.json or your user DB)
+    // Load user DB (newsletter-signups.json)
     let db = {};
     if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
         try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
     }
-    db[data.username] = { ...data, last_ip: data.creation_ip };
-    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
-    // Also log to cookie-signups.json as before
-    try {
-        const content = fs.existsSync(COOKIE_SIGNUP_FILE) ? fs.readFileSync(COOKIE_SIGNUP_FILE, 'utf8') : '';
-        const lines = content.split('\n').filter(line => line.trim());
-        lines.push(JSON.stringify(data));
-        fs.writeFileSync(COOKIE_SIGNUP_FILE, lines.join('\n') + '\n');
-        res.json({ success: true, ...data });
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to save signup' });
+    const user = db[username];
+    if (!user || user.password !== password) {
+        return res.status(403).json({ error: 'Invalid username or password' });
     }
+    // Load cloud DB
+    let cloud = {};
+    if (fs.existsSync(COOKIE_CLOUD_FILE)) {
+        try { cloud = JSON.parse(fs.readFileSync(COOKIE_CLOUD_FILE, 'utf8')); } catch { cloud = {}; }
+    }
+    cloud[username] = { cookies, timestamp: timestamp || new Date().toISOString() };
+    try {
+        fs.writeFileSync(COOKIE_CLOUD_FILE, JSON.stringify(cloud, null, 2));
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to save cloud data' });
+    }
+});
+
+app.get('/cookie-cloud', (req, res) => {
+    const { username, password } = req.query || {};
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Missing username or password' });
+    }
+    // Load user DB
+    let db = {};
+    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
+        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
+    }
+    const user = db[username];
+    if (!user || user.password !== password) {
+        return res.status(403).json({ error: 'Invalid username or password' });
+    }
+    // Load cloud DB
+    let cloud = {};
+    if (fs.existsSync(COOKIE_CLOUD_FILE)) {
+        try { cloud = JSON.parse(fs.readFileSync(COOKIE_CLOUD_FILE, 'utf8')); } catch { cloud = {}; }
+    }
+    if (!cloud[username] || !cloud[username].cookies) {
+        return res.status(404).json({ error: 'No cloud data found' });
+    }
+    res.json({ cookies: cloud[username].cookies });
 });
 
 // Endpoint to get the user's IP address
