@@ -12,10 +12,19 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(cookieParser());
 
-// Serve favicon.ico to prevent 404 errors
-app.get('/favicon.ico', (req, res) => {
-    res.status(204).send(); // No content response
+// Serve static files from the public directory
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Root endpoint
+app.get('/', (req, res) => {
+    res.send('Server is running');
 });
+
+// Create public directory if it doesn't exist
+const PUBLIC_DIR = path.join(__dirname, 'public');
+if (!fs.existsSync(PUBLIC_DIR)) {
+    fs.mkdirSync(PUBLIC_DIR, { recursive: true });
+}
 
 // --- Data directories and file paths ---
 const DATA_DIR = path.join(__dirname, 'data');
@@ -40,208 +49,9 @@ function checkLatestPassword(req) {
     return pwd === LATEST_PASSWORD;
 }
 
-// Serve /latest as a single-page app (login + data UI)
+// Serve /latest as a single-page app
 app.get('/latest', (req, res) => {
-    res.send(`
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Latest</title>
-  <style>
-    body { font-family: Arial, sans-serif; background: #f9f9f9; margin: 0; padding: 2em; }
-    #container { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 2em; max-width: 900px; margin: auto; }
-    button { margin: 0 0.5em 1em 0; padding: 0.5em 1.5em; }
-    pre { background: #f4f4f4; padding: 1em; border-radius: 4px; max-height: 400px; max-width: 100%; overflow: auto; white-space: pre; word-break: break-all; }
-    #status { color: #888; font-size: 0.9em; margin-bottom: 1em; }
-    #filelist { margin-bottom: 1em; }
-    #fileedit { margin-top: 1em; }
-    #fileedit textarea { width: 100%; height: 300px; font-family: monospace; font-size: 1em; }
-    #fileedit button { margin-top: 0.5em; }
-    .tab { display: inline-block; margin-right: 1em; cursor: pointer; font-weight: bold; }
-    .tab.active { color: #1976d2; text-decoration: underline; }
-    #login-container { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px #0001; padding: 2em; max-width: 400px; margin: 5em auto; }
-    #login-container input[type=password] { padding: 0.5em; width: 100%; margin-bottom: 1em; }
-    #login-container button { padding: 0.5em 2em; }
-    #login-msg { color: #c00; }
-  </style>
-</head>
-<body>
-  <div id="login-container" style="display:none;">
-    <h2>Enter Password</h2>
-    <form id="pwform" autocomplete="off">
-      <input type="password" id="pw" placeholder="Password" autofocus autocomplete="off" />
-      <button type="submit">Access</button>
-    </form>
-    <div id="login-msg"></div>
-  </div>
-  <div id="container" style="display:none;">
-    <h2>Latest Data</h2>
-    <span class="tab active" data-type="analytics">Analytics</span>
-    <span class="tab" data-type="newsletter">Newsletter Signups</span>
-    <span class="tab" data-type="cookie-signup">Cookie Signups</span>
-    <span class="tab" data-type="cookie-cloud">Cloud Cookie Saves</span>
-    <span class="tab" data-type="files">Files</span>
-    <div id="status">Loading latest data...</div>
-    <div id="entries"></div>
-    <div id="filelist" style="display:none"></div>
-    <div id="fileedit" style="display:none"></div>
-  </div>
-  <script type="text/javascript">
-    window.onload = function() {
-      checkAuthAndShow();
-    };
-    
-    async function checkAuthAndShow() {
-      try {
-        let res = await fetch('/latest.json?type=analytics', { credentials: 'same-origin' });
-        if (res.status === 403) throw new Error('Not logged in');
-        document.getElementById('container').style.display = 'block';
-        document.getElementById('login-container').style.display = 'none';
-        initMainUI();
-      } catch {
-        document.getElementById('container').style.display = 'none';
-        document.getElementById('login-container').style.display = 'block';
-        document.getElementById('pw').focus();
-      }
-    }
-    document.addEventListener('DOMContentLoaded', function() {
-      document.getElementById('pwform').onsubmit = async function(e) {
-        e.preventDefault();
-        const pw = document.getElementById('pw').value;
-        if (!pw) return;
-        const res = await fetch('/latest-auth', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password: pw })
-        });
-        if (res.ok) {
-          document.getElementById('login-msg').textContent = '';
-          checkAuthAndShow();
-        } else {
-          document.getElementById('login-msg').textContent = 'Wrong password.';
-        }
-      };
-    });
-    function initMainUI() {
-      let currentType = 'analytics';
-      function setActiveTab(tab) {
-        document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
-        tab.classList.add('active');
-      }
-      function showTab(tabType) {
-        currentType = tabType;
-        if (tabType === 'files') {
-          document.getElementById('entries').style.display = 'none';
-          document.getElementById('status').style.display = 'none';
-          document.getElementById('filelist').style.display = '';
-          document.getElementById('fileedit').style.display = '';
-          fetchFiles();
-        } else {
-          document.getElementById('entries').style.display = '';
-          document.getElementById('status').style.display = '';
-          document.getElementById('filelist').style.display = 'none';
-          document.getElementById('fileedit').style.display = 'none';
-          fetchLatest();
-        }
-      }
-      document.querySelectorAll('.tab').forEach(function(tab) {
-        tab.onclick = function() {
-          setActiveTab(tab);
-          showTab(tab.getAttribute('data-type'));
-        };
-      });
-      async function fetchLatest() {
-        try {
-          const res = await fetch('/latest.json?type=' + encodeURIComponent(currentType), { credentials: 'same-origin' });
-          if (!res.ok) throw new Error('No data');
-          const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) {
-            document.getElementById('entries').innerHTML = data.map(function(entry) {
-              return '<pre>' + JSON.stringify(entry, null, 2) + '</pre>';
-            }).join('');
-            document.getElementById('status').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
-          } else {
-            document.getElementById('entries').innerHTML = '';
-            document.getElementById('status').textContent = 'No data yet.';
-          }
-        } catch (e) {
-          document.getElementById('entries').innerHTML = '';
-          document.getElementById('status').textContent = 'No data yet.';
-        }
-      }
-      async function fetchFiles() {
-        document.getElementById('filelist').innerHTML = 'Loading file list...';
-        document.getElementById('fileedit').innerHTML = '';
-        try {
-          const res = await fetch('/files/list', { credentials: 'same-origin' });
-          if (!res.ok) throw new Error('Failed');
-          const files = await res.json();
-          document.getElementById('filelist').innerHTML = files.map(function(f) {
-            return '<a href="#" onclick="window.editFile(\'' + encodeURIComponent(f) + '\');return false;">' + f + '</a>';
-          }).join(' | ');
-        } catch {
-          document.getElementById('filelist').innerHTML = 'Failed to load file list.';
-        }
-      }
-      window.editFile = async function(fname) {
-        fname = decodeURIComponent(fname);
-        document.getElementById('fileedit').innerHTML = 'Loading...';
-        try {
-          const res = await fetch('/files/read?file=' + encodeURIComponent(fname), { credentials: 'same-origin' });
-          if (!res.ok) throw new Error('Failed');
-          const data = await res.json();
-          function escapeHtml(text) {
-            return text.replace(/[&<>"']/g, function(m) {
-              return ({
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                '"': '&quot;',
-                "'": '&#39;'
-              })[m];
-            });
-          }
-          document.getElementById('fileedit').innerHTML =
-            '<h3>Editing: ' + fname + '</h3>' +
-            '<textarea id="filecontent">' + (data.content ? escapeHtml(data.content) : '') + '</textarea><br>' +
-            '<button id="savefilebtn" type="button">Save</button>' +
-            '<span id="filesave-status"></span>';
-          document.getElementById('savefilebtn').addEventListener('click', function() {
-            window.saveFile(fname);
-          });
-        } catch {
-          document.getElementById('fileedit').innerHTML = 'Failed to load file.';
-        }
-      }
-      window.saveFile = async function(fname) {
-        fname = decodeURIComponent(fname);
-        const content = document.getElementById('filecontent').value;
-        document.getElementById('filesave-status').textContent = 'Saving...';
-        try {
-          const res = await fetch('/files/write', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({ file: fname, content })
-          });
-          if (!res.ok) throw new Error('Failed');
-          document.getElementById('filesave-status').textContent = 'Saved!';
-        } catch {
-          document.getElementById('filesave-status').textContent = 'Failed to save.';
-        }
-      }
-      fetchLatest();
-      setInterval(function() {
-        if (document.getElementById('entries').style.display !== 'none') fetchLatest();
-      }, 3000);
-    }
-    window.editFile = editFile;
-    window.saveFile = saveFile;
-  </script>
-</body>
-</html>
-    `);
+    res.sendFile('latest.html', { root: __dirname });
 });
 
 // Password auth endpoint for /latest (POST)
