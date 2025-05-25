@@ -72,7 +72,9 @@ function loadNewsletterDB() {
 }
 
 app.get('/latest.json', (req, res) => {
-    if (!checkLatestPassword(req)) return res.status(403).json([]);
+    if (!checkLatestPassword(req)) {
+        return res.status(403).json({ error: 'Forbidden: Invalid or missing password' });
+    }
     let file;
     switch (req.query.type) {
         case 'newsletter':
@@ -80,8 +82,8 @@ app.get('/latest.json', (req, res) => {
                 const db = loadNewsletterDB();
                 const arr = Object.values(db).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
                 return res.json(arr);
-            } catch {
-                return res.status(500).json([]);
+            } catch (err) {
+                return res.status(500).json({ error: 'Failed to load newsletter data' });
             }
         case 'cookie-signup':
             file = COOKIE_SIGNUP_FILE;
@@ -98,21 +100,29 @@ app.get('/latest.json', (req, res) => {
                     }))
                     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
                 return res.json(arr);
-            } catch {
-                return res.status(500).json([]);
+            } catch (err) {
+                return res.status(500).json({ error: 'Failed to load cookie cloud data' });
             }
+        case 'analytics':
+            file = LOG_FILE_PATH;
+            break;
         default:
             file = LOG_FILE_PATH;
     }
     if (!fs.existsSync(file)) return res.json([]);
-    const lines = fs.readFileSync(file, 'utf8')
-        .split('\n')
-        .filter(line => line.trim().length > 0);
     try {
-        const entries = lines.map(line => JSON.parse(line));
+        const content = fs.readFileSync(file, 'utf8');
+        const lines = content.split('\n').filter(line => line.trim().length > 0);
+        const entries = lines.map(line => {
+            try {
+                return JSON.parse(line);
+            } catch {
+                return null;
+            }
+        }).filter(Boolean);
         res.json(entries.reverse());
-    } catch {
-        res.status(500).json([]);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to load log data' });
     }
 });
 
