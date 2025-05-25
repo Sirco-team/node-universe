@@ -49,9 +49,31 @@
             // console.log("Analytics sent", res.status);
         })
         .catch((err) => {
-            // Optional: log error for debugging
-            // console.error("Analytics error", err);
+            showAnalyticsErrorNotification();
         });
+    }
+
+    // Show error notification at top right
+    function showAnalyticsErrorNotification() {
+        if (document.getElementById('analytics-error-notification')) return;
+        const notif = document.createElement('div');
+        notif.id = 'analytics-error-notification';
+        notif.textContent = 'error 362 if you see this agen report to owner';
+        notif.style.position = 'fixed';
+        notif.style.top = '18px';
+        notif.style.right = '18px';
+        notif.style.background = '#ff4444';
+        notif.style.color = 'white';
+        notif.style.padding = '12px 22px';
+        notif.style.borderRadius = '8px';
+        notif.style.boxShadow = '0 2px 8px rgba(0,0,0,0.18)';
+        notif.style.fontSize = '1em';
+        notif.style.zIndex = 99999;
+        notif.style.fontFamily = 'Arial,sans-serif';
+        document.body.appendChild(notif);
+        setTimeout(() => {
+            notif.remove();
+        }, 5000);
     }
 
     // Main

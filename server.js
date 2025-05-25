@@ -35,6 +35,7 @@ const LOG_FILE_PATH = path.join(DATA_DIR, 'analytics-log.json');
 const NEWSLETTER_FILE_PATH = path.join(DATA_DIR, 'newsletter-signups.json');
 const COOKIE_SIGNUP_FILE = path.join(DATA_DIR, 'cookie-signups.json');
 const COOKIE_CLOUD_FILE = path.join(DATA_DIR, 'cookie-cloud.json');
+const BANNED_IPS_FILE = path.join(DATA_DIR, 'banned-ips.json');
 const PORT = process.env.PORT || 3443;
 const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 const SSL_KEY_PATH = process.env.SSL_KEY_PATH || './key.pem';
@@ -116,17 +117,50 @@ app.get('/latest.json', (req, res) => {
 });
 
 // --- Cookie signup endpoint ---
-app.post('/cookie-signup', (req, res) => {
+app.post('/cookie-signup', bannedIPMiddleware, (req, res, next) => {
     const data = { ...req.body, timestamp: new Date().toISOString() };
+    // Save creation_ip
+    if (!data.creation_ip) {
+        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
+        data.creation_ip = ip;
+    }
+    // Save to DB (example: newsletter-signups.json or your user DB)
+    let db = {};
+    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
+        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
+    }
+    db[data.username] = { ...data, last_ip: data.creation_ip };
+    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
+    // Also log to cookie-signups.json as before
     try {
         const content = fs.existsSync(COOKIE_SIGNUP_FILE) ? fs.readFileSync(COOKIE_SIGNUP_FILE, 'utf8') : '';
         const lines = content.split('\n').filter(line => line.trim());
         lines.push(JSON.stringify(data));
         fs.writeFileSync(COOKIE_SIGNUP_FILE, lines.join('\n') + '\n');
-        res.json({ success: true });
+        res.json({ success: true, ...data });
     } catch (err) {
         res.status(500).json({ error: 'Failed to save signup' });
     }
+});
+
+// --- Cookie verify endpoint (login) ---
+app.post('/cookie-verify', (req, res) => {
+    const { username, password, last_ip } = req.body;
+    let db = {};
+    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
+        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
+    }
+    const user = db[username];
+    if (user && user.password === password) {
+        // Update last_ip
+        if (last_ip) {
+            user.last_ip = last_ip;
+            db[username] = user;
+            fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
+        }
+        return res.json({ valid: true, ...user });
+    }
+    res.json({ valid: false });
 });
 
 // --- Terminal interactive menu for live traffic viewing ---
@@ -228,6 +262,103 @@ app.use((req, res, next) => {
         return origSend.call(this, data);
     };
     next();
+});
+
+// --- Banned IPs functionality ---
+
+if (!fs.existsSync(BANNED_IPS_FILE)) {
+    fs.writeFileSync(BANNED_IPS_FILE, JSON.stringify([]));
+}
+
+function loadBannedIPs() {
+    try {
+        return JSON.parse(fs.readFileSync(BANNED_IPS_FILE, 'utf8'));
+    } catch {
+        return [];
+    }
+}
+function saveBannedIPs(ips) {
+    fs.writeFileSync(BANNED_IPS_FILE, JSON.stringify(ips, null, 2));
+}
+function isIPBanned(ip) {
+    const banned = loadBannedIPs();
+    return banned.includes(ip);
+}
+
+// Middleware to block banned IPs from sensitive endpoints
+function bannedIPMiddleware(req, res, next) {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
+    if (isIPBanned(ip)) {
+        return res.status(403).json({ error: 'Your IP is banned.' });
+    }
+    next();
+}
+
+// API to get all banned IPs
+app.get('/banned-ips', (req, res) => {
+    res.json(loadBannedIPs());
+});
+// API to ban an IP (POST, expects {ip})
+app.post('/ban-ip', (req, res) => {
+    const { ip } = req.body;
+    if (!ip) return res.status(400).json({ error: 'No IP provided' });
+    const banned = loadBannedIPs();
+    if (!banned.includes(ip)) {
+        banned.push(ip);
+        saveBannedIPs(banned);
+    }
+    res.json({ success: true, banned });
+});
+// API to unban an IP (POST, expects {ip})
+app.post('/unban-ip', (req, res) => {
+    const { ip } = req.body;
+    if (!ip) return res.status(400).json({ error: 'No IP provided' });
+    let banned = loadBannedIPs();
+    banned = banned.filter(item => item !== ip);
+    saveBannedIPs(banned);
+    res.json({ success: true, banned });
+});
+
+// Apply bannedIPMiddleware to signup/account creation endpoints
+app.post('/cookie-signup', bannedIPMiddleware, (req, res, next) => {
+    const data = { ...req.body, timestamp: new Date().toISOString() };
+    // Save creation_ip
+    if (!data.creation_ip) {
+        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
+        data.creation_ip = ip;
+    }
+    // Save to DB (example: newsletter-signups.json or your user DB)
+    let db = {};
+    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
+        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
+    }
+    db[data.username] = { ...data, last_ip: data.creation_ip };
+    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
+    // Also log to cookie-signups.json as before
+    try {
+        const content = fs.existsSync(COOKIE_SIGNUP_FILE) ? fs.readFileSync(COOKIE_SIGNUP_FILE, 'utf8') : '';
+        const lines = content.split('\n').filter(line => line.trim());
+        lines.push(JSON.stringify(data));
+        fs.writeFileSync(COOKIE_SIGNUP_FILE, lines.join('\n') + '\n');
+        res.json({ success: true, ...data });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to save signup' });
+    }
+});
+
+// Endpoint to get the user's IP address
+app.get('/my-ip', (req, res) => {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
+    res.json({ ip });
+});
+
+// List files in a directory (public or data)
+app.get('/files/list', (req, res) => {
+    const dir = req.query.dir === 'data' ? DATA_DIR : PUBLIC_DIR;
+    fs.readdir(dir, (err, files) => {
+        if (err) return res.status(500).json({ error: 'Failed to list files' });
+        res.json(files);
+    });
 });
 
 // HTTPS server if certs exist, otherwise HTTP

@@ -287,7 +287,7 @@ function showAllSiteData() {
                             getAllReq.onerror = function() {
                                 dbBlock.innerHTML += `<span style="color:#f44;">(error reading data)</span><br>`;
                             };
-                        } catch {
+                        } catch (e) {
                             dbBlock.innerHTML += `<span style="color:#f44;">(cannot read)</span><br>`;
                         }
                     });
@@ -303,7 +303,6 @@ function showAllSiteData() {
         idbDiv.innerHTML = '<b>IndexedDB Data:</b><br><span style="color:#888;">Cannot enumerate databases in this browser.</span>';
     }
 }
-
 // Add a "Refresh Data" button for user to reload all data
 function addRefreshButton() {
     if (document.getElementById('refresh-data-btn')) return;
@@ -319,18 +318,65 @@ function addRefreshButton() {
     container.insertBefore(btn, container.firstChild);
 }
 
-// On load, check if signed up and verify account with server
+// Helper function to check if the account_created cookie exists
+function hasAccountCreatedCookie() {
+    return document.cookie.split(';').some((item) => item.trim().startsWith('account_created='));
+}
+
+// Check if the current user's IP is banned and disable signup if so
+function checkIfBanned() {
+    fetch(BACKEND_URL + '/banned-ips', {
+        method: 'GET',
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+    })
+    .then(res => res.json())
+    .then(bannedList => {
+        // The backend should ideally provide the user's IP, but if not, this is a placeholder
+        // If you have a /my-ip endpoint, you can fetch the user's IP and check if it's in bannedList
+        // For now, just show a warning if the backend returns a special flag (not implemented here)
+        // Example: if (bannedList.includes(userIp)) { ... }
+    })
+    .catch(() => {
+        // Ignore errors
+    });
+}
+
+// Store user's IP for use in signup/login
+window.USER_IP = null;
+function fetchUserIP() {
+    fetch(BACKEND_URL + '/my-ip', {
+        method: 'GET',
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+    })
+    .then(res => res.json())
+    .then(data => {
+        window.USER_IP = data.ip;
+    })
+    .catch(() => {
+        window.USER_IP = null;
+    });
+}
+
 window.addEventListener('DOMContentLoaded', () => {
+    fetchUserIP();
+    checkIfBanned();
+    if (hasAccountCreatedCookie()) {
+        showSection('cookie-section');
+        showCookies();
+        showAllSiteData();
+        addRefreshButton();
+        return;
+    }
     const cookies = getAllCookies();
     if (cookies.cookie_saver_signedup === '1') {
         // Verify account with server before showing cookies
         const username = cookies.cookie_saver_username;
         const password = cookies.cookie_saver_password;
         if (username && password) {
-            fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-verify', { // <--- use only ngrok URL
+            fetch(BACKEND_URL + '/cookie-verify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({ username, password, last_ip: window.USER_IP }),
             })
             .then(res => res.json())
             .then(data => {
@@ -361,6 +407,11 @@ window.addEventListener('DOMContentLoaded', () => {
 // Signup form
 document.getElementById('signup-form').onsubmit = function(e) {
     e.preventDefault();
+    // Check if account_created cookie exists
+    if (hasAccountCreatedCookie()) {
+        showMessage('An account has already been created. Further sign-ups are disabled.', 'red');
+        return;
+    }
     const username = document.getElementById('signup-username').value.trim();
     const password = document.getElementById('signup-password').value.trim();
     const name = document.getElementById('signup-name').value.trim();
@@ -369,56 +420,78 @@ document.getElementById('signup-form').onsubmit = function(e) {
         showMessage('Please fill all fields.', 'red');
         return;
     }
-    // Check with server if account is valid or needs to be created
-    fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
+    // Check if a user with the same username or email already exists
+    fetch(BACKEND_URL + '/cookie-check-username-email?username=' + encodeURIComponent(username) + '&email=' + encodeURIComponent(email), {
+        method: 'GET',
+        headers: { 'ngrok-skip-browser-warning': 'true' }
     })
-    .then(res => {
-        if (!res.ok) throw new Error('Network error');
-        return res.json();
-    })
+    .then(res => res.json())
     .then(data => {
-        if (data.valid) {
-            setCookie('cookie_saver_signedup', '1', 365);
-            setCookie('cookie_saver_username', username, 365);
-            setCookie('cookie_saver_password', password, 365);
-            setCookie('cookie_saver_name', name, 365);
-            setCookie('cookie_saver_email', email, 365);
-            showSection('cookie-section');
-            showCookies();
-            showMessage('Logged in and cookies loaded!');
+        if (data.usernameExists) {
+            showMessage('This username is already taken. Please choose a different one.', 'red');
+        } else if (data.emailExists) {
+            showMessage('This email is already used. Please use a different email.', 'red');
         } else {
-            // Save signup info to backend (register new account)
-            fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-signup', {
+            // Check with server if account is valid or needs to be created
+            fetch(BACKEND_URL + '/cookie-verify', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
-                body: JSON.stringify({ username, password, name, email, timestamp: new Date().toISOString() })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password, last_ip: window.USER_IP })
             })
-            .then(resp => {
-                if (!resp.ok) throw new Error('Network error');
-                return resp.json();
+            .then(res => { new Error('Network error');
+                if (!res.ok) throw new Error('Network error');
+                return res.json();
             })
             .then(data => {
-                if (data.success) {
-                    // Auto sign-in after signup
+                if (data.valid) {
                     setCookie('cookie_saver_signedup', '1', 365);
-                    setCookie('cookie_saver_username', data.username, 365);
-                    setCookie('cookie_saver_password', data.password, 365);
-                    setCookie('cookie_saver_name', data.name, 365);
-                    setCookie('cookie_saver_email', data.email, 365);
+                    setCookie('cookie_saver_username', username, 365);
+                    setCookie('cookie_saver_password', password, 365);
+                    setCookie('cookie_saver_name', name, 365);
+                    setCookie('cookie_saver_email', email, 365);
+                    setCookie('account_created', '1', 365); // Set the account_created cookie
                     showSection('cookie-section');
                     showCookies();
-                    showMessage('Signed up and logged in!');
+                    showMessage('Logged in and cookies loaded!');
                 } else {
-                    showMessage('Sign up failed: ' + (data.error || 'Unknown error'), 'red');
-                    clearAccountCookies();
-                    showSection('signup-section');
+                    // Save signup info to backend (register new account)
+                    fetch(BACKEND_URL + '/cookie-signup', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+                        body: JSON.stringify({ username, password, name, email, timestamp: new Date().toISOString(), creation_ip: window.USER_IP })
+                    })
+                    .then(resp => { new Error('Network error');
+                        if (!resp.ok) throw new Error('Network error');
+                        return resp.json();
+                    })
+                    .then(data => {
+                        if (data.success) {
+                            // Auto sign-in after signup
+                            setCookie('cookie_saver_signedup', '1', 365);
+                            setCookie('cookie_saver_username', data.username, 365);
+                            setCookie('cookie_saver_password', data.password, 365);
+                            setCookie('cookie_saver_name', data.name, 365);
+                            setCookie('cookie_saver_email', data.email, 365);
+                            setCookie('account_created', '1', 365); // Set the account_created cookie
+                            showSection('cookie-section');
+                            showCookies();
+                            showMessage('Signed up and logged in!');
+                        } else {
+                            showMessage('Sign up failed: ' + (data.error || 'Unknown error'), 'red');
+                            clearAccountCookies();
+                            showSection('signup-section');
+                        }
+                    })
+                    .catch(() => {
+                        showMessage('Could not create account. Please try again.', 'red');
+                        clearAccountCookies();
+                        showSection('signup-section');
+                        showCookieSaverErrorNotification();
+                    });
                 }
             })
             .catch(() => {
-                showMessage('Could not create account. Please try again.', 'red');
+                showMessage('Could not verify or create account. Please check your connection.', 'red');
                 clearAccountCookies();
                 showSection('signup-section');
                 showCookieSaverErrorNotification();
@@ -426,15 +499,25 @@ document.getElementById('signup-form').onsubmit = function(e) {
         }
     })
     .catch(() => {
-        showMessage('Could not verify or create account. Please check your connection.', 'red');
-        clearAccountCookies();
-        showSection('signup-section');
+        showMessage('Could not check username/email. Please try again.', 'red');
         showCookieSaverErrorNotification();
     });
 };
 
-// Download cookies
-document.getElementById('download-cookies').onclick = function() {
+// Helper function to safely add click event listeners
+function safeAddClick(id, fn) {
+    const el = document.getElementById(id);
+    if (el) el.onclick = fn;
+}
+
+// Helper function to safely add submit event listeners
+function safeAddSubmit(id, fn) {
+    const el = document.getElementById(id);
+    if (el) el.onsubmit = fn;
+}
+
+// Use safeAddClick for all button event listeners
+safeAddClick('download-cookies', function() {
     const cookies = getUserCookies();
     const blob = new Blob([JSON.stringify(cookies, null, 2)], {type: 'application/json'});
     const url = URL.createObjectURL(blob);
@@ -443,10 +526,9 @@ document.getElementById('download-cookies').onclick = function() {
     a.download = 'cookies.json';
     a.click();
     URL.revokeObjectURL(url);
-};
+});
 
-// Import cookies from file
-document.getElementById('import-cookies').onclick = function() {
+safeAddClick('import-cookies', function() {
     const fileInput = document.getElementById('import-file');
     if (!fileInput.files.length) {
         showMessage('Please select a file to import.', 'red');
@@ -465,10 +547,9 @@ document.getElementById('import-cookies').onclick = function() {
         }
     };
     reader.readAsText(file);
-};
+});
 
-// Cloud save
-document.getElementById('cloud-save').onclick = function() {
+safeAddClick('cloud-save', function() {
     const username = getAllCookies().cookie_saver_username;
     const password = getAllCookies().cookie_saver_password;
     if (!username || !password) {
@@ -476,7 +557,7 @@ document.getElementById('cloud-save').onclick = function() {
         return;
     }
     const cookies = getUserCookies();
-    fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-cloud', {
+    fetch(BACKEND_URL + '/cookie-cloud', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
         body: JSON.stringify({ username, password, cookies, timestamp: new Date().toISOString() })
@@ -486,17 +567,16 @@ document.getElementById('cloud-save').onclick = function() {
         showMessage('Cloud save failed.', 'red');
         showCookieSaverErrorNotification();
     });
-};
+});
 
-// Cloud load
-document.getElementById('cloud-load').onclick = function() {
+safeAddClick('cloud-load', function() {
     const username = getAllCookies().cookie_saver_username;
     const password = getAllCookies().cookie_saver_password;
     if (!username || !password) {
         showMessage('No username/password found.', 'red');
         return;
     }
-    fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-cloud?username=' + encodeURIComponent(username) + '&password=' + encodeURIComponent(password), {
+    fetch(BACKEND_URL + '/cookie-cloud?username=' + encodeURIComponent(username) + '&password=' + encodeURIComponent(password), {
         method: 'GET',
         headers: { 'ngrok-skip-browser-warning': 'true' }
     })
@@ -514,17 +594,23 @@ document.getElementById('cloud-load').onclick = function() {
         showMessage('Cloud load failed.', 'red');
         showCookieSaverErrorNotification();
     });
-};
+});
 
-// Recover username/password by email and name
-document.getElementById('recover-btn').onclick = function() {
-    const email = document.getElementById('recover-email').value.trim();
-    const name = document.getElementById('recover-name').value.trim();
+safeAddClick('refresh-cookies', function() {
+    if (typeof showCookies === "function") showCookies();
+});
+
+safeAddClick('recover-btn', function() {
+    const emailInput = document.getElementById('recover-email');
+    const nameInput = document.getElementById('recover-name');
+    if (!emailInput || !nameInput) return;
+    const email = emailInput.value.trim();
+    const name = nameInput.value.trim();
     if (!email || !name) {
         showMessage('Please enter your email and name.', 'red');
         return;
     }
-    fetch('https://moving-badly-cheetah.ngrok-free.app/cookie-recover', {
+    fetch(BACKEND_URL + '/cookie-recover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
         body: JSON.stringify({ email, name })
@@ -544,4 +630,4 @@ document.getElementById('recover-btn').onclick = function() {
         showMessage('Recovery failed. Please try again.', 'red');
         showCookieSaverErrorNotification();
     });
-};
+});
