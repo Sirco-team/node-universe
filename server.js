@@ -35,7 +35,7 @@ const LOG_FILE_PATH = path.join(DATA_DIR, 'analytics-log.json');
 const NEWSLETTER_FILE_PATH = path.join(DATA_DIR, 'newsletter-signups.json');
 const COOKIE_SIGNUP_FILE = path.join(DATA_DIR, 'cookie-signups.json');
 const COOKIE_CLOUD_FILE = path.join(DATA_DIR, 'cookie-cloud.json');
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3443;
 const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 const SSL_KEY_PATH = process.env.SSL_KEY_PATH || './key.pem';
 const SSL_CERT_PATH = process.env.SSL_CERT_PATH || './cert.pem';
@@ -115,52 +115,17 @@ app.get('/latest.json', (req, res) => {
     }
 });
 
-// --- File manager endpoints (password protected) ---
-const ROOT_DIR = __dirname;
-const EXCLUDE_FILES = [
-    'node_modules', 'data', '.git', '.env', 'key.pem', 'cert.pem'
-];
-
-app.get('/files/list', (req, res) => {
-    if (!checkLatestPassword(req)) return res.status(403).json([]);
+// --- Cookie signup endpoint ---
+app.post('/cookie-signup', (req, res) => {
+    const data = { ...req.body, timestamp: new Date().toISOString() };
     try {
-        const files = fs.readdirSync(ROOT_DIR)
-            .filter(f => !EXCLUDE_FILES.includes(f) && fs.statSync(path.join(ROOT_DIR, f)).isFile());
-        res.json(files);
-    } catch {
-        res.status(500).json([]);
-    }
-});
-
-app.get('/files/read', (req, res) => {
-    if (!checkLatestPassword(req)) return res.status(403).json({ error: 'Forbidden' });
-    const fname = req.query.file;
-    if (!fname || fname.includes('/') || fname.includes('\\') || EXCLUDE_FILES.includes(fname)) {
-        return res.status(400).json({ error: 'Invalid file' });
-    }
-    const fpath = path.join(ROOT_DIR, fname);
-    if (!fs.existsSync(fpath)) return res.status(404).json({ error: 'Not found' });
-    try {
-        const content = fs.readFileSync(fpath, 'utf8');
-        res.json({ content });
-    } catch {
-        res.status(500).json({ error: 'Failed to read' });
-    }
-});
-
-app.post('/files/write', (req, res) => {
-    if (!checkLatestPassword(req)) return res.status(403).json({ error: 'Forbidden' });
-    const { file, content } = req.body;
-    if (!file || file.includes('/') || file.includes('\\') || EXCLUDE_FILES.includes(file)) {
-        return res.status(400).json({ error: 'Invalid file' });
-    }
-    const fpath = path.join(ROOT_DIR, file);
-    if (!fs.existsSync(fpath)) return res.status(404).json({ error: 'Not found' });
-    try {
-        fs.writeFileSync(fpath, content, 'utf8');
+        const content = fs.existsSync(COOKIE_SIGNUP_FILE) ? fs.readFileSync(COOKIE_SIGNUP_FILE, 'utf8') : '';
+        const lines = content.split('\n').filter(line => line.trim());
+        lines.push(JSON.stringify(data));
+        fs.writeFileSync(COOKIE_SIGNUP_FILE, lines.join('\n') + '\n');
         res.json({ success: true });
-    } catch {
-        res.status(500).json({ error: 'Failed to write' });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to save signup' });
     }
 });
 
