@@ -398,6 +398,21 @@ app.get('/files/list', (req, res) => {
     });
 });
 
+// --- Analytics collection endpoint ---
+app.post('/collect', (req, res) => {
+    const data = { ...req.body, timestamp: new Date().toISOString() };
+    // Ensure log file exists
+    if (!fs.existsSync(LOG_FILE_PATH)) {
+        fs.writeFileSync(LOG_FILE_PATH, '');
+    }
+    try {
+        fs.appendFileSync(LOG_FILE_PATH, JSON.stringify(data) + '\n');
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to log analytics data' });
+    }
+});
+
 // HTTPS server if certs exist, otherwise HTTP
 if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
     const sslOptions = {
