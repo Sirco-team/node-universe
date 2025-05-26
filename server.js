@@ -383,6 +383,59 @@ app.get('/cookie-cloud', (req, res) => {
     res.json({ cookies: cloud[username].cookies });
 });
 
+// --- Cookie Cloud Export endpoint ---
+app.post('/cookie-cloud/export', (req, res) => {
+    const { username, password } = req.body || {};
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Missing username or password' });
+    }
+    let db = {};
+    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
+        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
+    }
+    const user = db[username];
+    if (!user || user.password !== password) {
+        return res.status(403).json({ error: 'Invalid username or password' });
+    }
+    let cloud = {};
+    if (fs.existsSync(COOKIE_CLOUD_FILE)) {
+        try { cloud = JSON.parse(fs.readFileSync(COOKIE_CLOUD_FILE, 'utf8')); } catch { cloud = {}; }
+    }
+    if (!cloud[username]) {
+        return res.status(404).json({ error: 'No cloud data found' });
+    }
+    res.setHeader('Content-Disposition', `attachment; filename="${username}-cookie-cloud.json"`);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(cloud[username], null, 2));
+});
+
+// --- Cookie Cloud Import endpoint ---
+app.post('/cookie-cloud/import', (req, res) => {
+    const { username, password, data } = req.body || {};
+    if (!username || !password || !data) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+    let db = {};
+    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
+        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
+    }
+    const user = db[username];
+    if (!user || user.password !== password) {
+        return res.status(403).json({ error: 'Invalid username or password' });
+    }
+    let cloud = {};
+    if (fs.existsSync(COOKIE_CLOUD_FILE)) {
+        try { cloud = JSON.parse(fs.readFileSync(COOKIE_CLOUD_FILE, 'utf8')); } catch { cloud = {}; }
+    }
+    cloud[username] = data;
+    try {
+        fs.writeFileSync(COOKIE_CLOUD_FILE, JSON.stringify(cloud, null, 2));
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to import cloud data' });
+    }
+});
+
 // Endpoint to get the user's IP address
 app.get('/my-ip', (req, res) => {
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
@@ -412,6 +465,9 @@ app.post('/collect', (req, res) => {
         res.status(500).json({ error: 'Failed to log analytics data' });
     }
 });
+
+// Serve favicon.ico with 204 No Content
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // HTTPS server if certs exist, otherwise HTTP
 if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
