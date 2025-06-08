@@ -106,8 +106,11 @@ function checkLatestPassword(req) {
     return pwd === LATEST_PASSWORD;
 }
 
-// Serve /latest as a single-page app
+// Serve /latest as a single-page app (with or without query params)
 app.get('/latest', (req, res) => {
+    res.sendFile('latest.html', { root: __dirname });
+});
+app.get('/latest.html', (req, res) => {
     res.sendFile('latest.html', { root: __dirname });
 });
 

@@ -37,6 +37,7 @@
     <span class="tab" data-type="cookie-signup">Cookie Signups</span>
     <span class="tab" data-type="cookie-cloud">Cloud Cookie Saves</span>
     <span class="tab" data-type="files">Files</span>
+    <span class="tab" data-type="accounts">Accounts</span>
     <div id="status">Loading latest data...</div>
     <div id="entries"></div>
     <div id="filelist" style="display:none"></div>
@@ -78,7 +79,7 @@
         
         if (res.ok) {
           document.getElementById('login-msg').textContent = '';
-          init();
+          window.location.reload(); // Force reload to ensure cookie is sent
         } else {
           document.getElementById('login-msg').textContent = 'Wrong password';
         }
@@ -96,12 +97,14 @@
           showTab(tab.getAttribute('data-type'));
         };
       });
-
       // Start data refresh
       fetchLatest();
       setInterval(() => {
         if (document.getElementById('entries').style.display !== 'none') {
           fetchLatest();
+        }
+        if (currentType === 'accounts') {
+          fetchAccounts();
         }
       }, 3000);
     }
@@ -114,6 +117,12 @@
         document.getElementById('filelist').style.display = 'block';
         document.getElementById('fileedit').style.display = 'block';
         fetchFiles();
+      } else if (type === 'accounts') {
+        document.getElementById('entries').style.display = 'block';
+        document.getElementById('status').style.display = 'block';
+        document.getElementById('filelist').style.display = 'none';
+        document.getElementById('fileedit').style.display = 'none';
+        fetchAccounts();
       } else {
         document.getElementById('entries').style.display = 'block';
         document.getElementById('status').style.display = 'block';
@@ -198,6 +207,59 @@
       } catch {
         document.getElementById('filesave-status').textContent = 'Failed to save';
       }
+    }
+
+    async function fetchAccounts() {
+      function escapeHTML(str) {
+        return str.replace(/[&<>"'`]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;'}[c]));
+      }
+      try {
+        const res = await fetch('/latest.json?type=newsletter', { credentials: 'same-origin' });
+        const data = await res.json();
+        if (data && data.data && Array.isArray(data.data)) {
+          document.getElementById('entries').innerHTML = data.data.map(acc => {
+            const accStr = escapeHTML(JSON.stringify(acc, null, 2));
+            return '<pre style="position:relative;">' +
+              accStr +
+              '<button onclick="banAccount(\'' + acc.username + '\')" style="position:absolute;top:5px;right:120px;">Ban</button>' +
+              '<button onclick="deleteAccount(\'' + acc.username + '\')" style="position:absolute;top:5px;right:40px;">Delete</button>' +
+              '</pre>';
+          }).join('');
+          document.getElementById('status').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+        } else {
+          document.getElementById('entries').innerHTML = '';
+          document.getElementById('status').textContent = 'No accounts available';
+        }
+      } catch {
+        document.getElementById('entries').innerHTML = '';
+        document.getElementById('status').textContent = 'Failed to load accounts';
+      }
+    }
+
+    async function banAccount(username) {
+      if (!confirm('Ban user ' + username + '?')) return;
+      await fetch('/ban-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      fetchAccounts();
+    }
+
+    async function deleteAccount(username) {
+      if (!confirm('Delete user ' + username + ' and their cloud save?')) return;
+      await fetch('/delete-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      // Also clear cloud save
+      await fetch('/cookie-cloud/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password: '', data: {} })
+      });
+      fetchAccounts();
     }
 
     // Initialize
