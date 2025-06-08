@@ -47,7 +47,7 @@ const SSL_CERT_PATH = process.env.SSL_CERT_PATH || './cert.pem';
 const LATEST_PASSWORD = process.env.LATEST_PASSWORD || 'letmein';
 const LATEST_COOKIE = 'latest_auth';
 
-// --- Nodemailer Gmail setup ---
+// --- Nodemailer Yahoo setup ---
 let GMAIL_USER = process.env.GMAIL_USER;
 let GMAIL_PASS = process.env.GMAIL_PASS;
 try {
@@ -55,8 +55,8 @@ try {
     if (fs.existsSync(credsPath)) {
         const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
         if (creds.email && creds.password) {
-            GMAIL_USER = Buffer.from(creds.email, 'base64').toString('utf8');
-            GMAIL_PASS = Buffer.from(creds.password, 'base64').toString('utf8');
+            GMAIL_USER = creds.email;
+            GMAIL_PASS = creds.password;
         }
     }
 } catch (e) {
@@ -66,9 +66,9 @@ try {
 let transporter = null;
 if (GMAIL_USER && GMAIL_PASS) {
     transporter = nodemailer.createTransport({
-        host: 'smtp.office365.com',
+        host: 'in-v3.mailjet.com',
         port: 587,
-        secure: false, // use TLS
+        secure: false, // TLS
         auth: {
             user: GMAIL_USER,
             pass: GMAIL_PASS
@@ -76,11 +76,11 @@ if (GMAIL_USER && GMAIL_PASS) {
     });
     transporter.verify(function(error, success) {
         if (error) {
-            console.error('Outlook transporter could not connect or authenticate:', error.message || error);
+            console.error('Mailjet transporter could not connect or authenticate:', error.message || error);
             console.error('Email sending will be disabled, but the server will continue running.');
             transporter = null;
         } else {
-            console.log('Outlook transporter is ready to send emails.');
+            console.log('Mailjet transporter is ready to send emails.');
         }
     });
 }
