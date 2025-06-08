@@ -90,8 +90,18 @@ async function sendVerificationEmail(email, code) {
     const mailOptions = {
         from: 'timco307@gmail.com', // Use a valid, verified sender for Mailjet
         to: email,
-        subject: 'Your Verification Code',
-        text: `Your verification code is: ${code}`
+        subject: 'UBG-Universe Account Activation Code',
+        text: `Welcome to UBG-Universe!\n\nYour activation code is: ${code}\n\nPlease enter this code to verify your account.\n\nFor your security, you will not need this code after verification, and no one will ever ask you for it.\n\nIf you did not request this, you can ignore this email.\n\nThank you!\nUBG-Universe Team`,
+        html: `<div style='font-family:sans-serif;max-width:500px;margin:auto;background:#f9f9f9;padding:2em;border-radius:8px;'>
+          <h2 style='color:#1976d2;'>UBG-Universe Account Activation</h2>
+          <p>Welcome to <b>UBG-Universe</b>!</p>
+          <p style='font-size:1.2em;'>Your activation code is:</p>
+          <div style='font-size:2em;font-weight:bold;background:#fff;padding:1em 2em;border-radius:6px;border:1px solid #eee;display:inline-block;margin-bottom:1em;'>${code}</div>
+          <p>Enter this code to verify your account.</p>
+          <p style='color:#888;font-size:0.95em;'>For your security, you will not need this code after verification, and no one will ever ask you for it.</p>
+          <p style='color:#888;font-size:0.95em;'>If you did not request this, you can ignore this email.</p>
+          <p style='margin-top:2em;color:#1976d2;'>Thank you!<br>UBG-Universe Team</p>
+        </div>`
     };
     try {
         await transporter.sendMail(mailOptions);
@@ -118,7 +128,13 @@ app.get('/latest.html', (req, res) => {
 app.post('/latest-auth', (req, res) => {
     const { password } = req.body;
     if (password === LATEST_PASSWORD) {
-        res.cookie(LATEST_COOKIE, password, { httpOnly: true, sameSite: 'lax' });
+        // Set cookie for both HTTP and HTTPS
+        const cookieOptions = {
+            httpOnly: true,
+            sameSite: req.secure ? 'none' : 'lax',
+            secure: !!req.secure || req.headers['x-forwarded-proto'] === 'https'
+        };
+        res.cookie(LATEST_COOKIE, password, cookieOptions);
         return res.json({ ok: true });
     }
     res.status(401).json({ ok: false });
@@ -257,6 +273,28 @@ app.post('/ban-user', (req, res) => {
     user.banned = true;
     db[username] = user;
     fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
+    res.json({ success: true });
+});
+// --- Delete user endpoint ---
+app.post('/delete-user', (req, res) => {
+    const { username } = req.body;
+    if (!username) return res.status(400).json({ error: 'Missing username' });
+    let db = {};
+    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
+        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
+    }
+    if (!db[username]) return res.status(404).json({ error: 'User not found' });
+    delete db[username];
+    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
+    // Also remove from cloud saves
+    let cloud = {};
+    if (fs.existsSync(COOKIE_CLOUD_FILE)) {
+        try { cloud = JSON.parse(fs.readFileSync(COOKIE_CLOUD_FILE, 'utf8')); } catch { cloud = {}; }
+    }
+    if (cloud[username]) {
+        delete cloud[username];
+        fs.writeFileSync(COOKIE_CLOUD_FILE, JSON.stringify(cloud, null, 2));
+    }
     res.json({ success: true });
 });
 // --- Cookie verify endpoint (login) ---
@@ -682,3 +720,80 @@ if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
         console.log(`Access from your Pi's browser: http://` + getLocalIP() + `:${PORT}`);
     });
 }
+
+// --- Send newsletter email to all signups ---
+app.post('/send-newsletter', async (req, res) => {
+    const { subject, message } = req.body;
+    if (!subject || !message) return res.status(400).json({ error: 'Missing subject or message' });
+    if (!transporter) return res.status(500).json({ error: 'Email not configured' });
+    let db = {};
+    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
+        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
+    }
+    const recipients = Object.values(db)
+        .filter(u => u.email && u.verified)
+        .map(u => u.email);
+    if (recipients.length === 0) return res.status(400).json({ error: 'No verified emails to send to' });
+    try {
+        for (const email of recipients) {
+            await transporter.sendMail({
+                from: 'timco307@gmail.com',
+                to: email,
+                subject,
+                text: message,
+                html: `<div style='font-family:sans-serif;max-width:500px;margin:auto;background:#f9f9f9;padding:2em;border-radius:8px;'>${message.replace(/\n/g,'<br>')}</div>`
+            });
+        }
+        res.json({ success: true, sent: recipients.length });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to send newsletter', detail: err.message });
+    }
+});
+
+// --- Admin settings endpoints ---
+const ADMIN_SETTINGS_FILE = path.join(DATA_DIR, 'admin-settings.json');
+
+// Get admin settings
+app.get('/admin-settings', (req, res) => {
+    let settings = {};
+    if (fs.existsSync(ADMIN_SETTINGS_FILE)) {
+        try { settings = JSON.parse(fs.readFileSync(ADMIN_SETTINGS_FILE, 'utf8')); } catch { settings = {}; }
+    }
+    res.json({
+        fromEmail: settings.fromEmail || GMAIL_USER || '',
+        apiKey: settings.apiKey || '',
+        apiSecret: settings.apiSecret || ''
+    });
+});
+
+// Update admin settings
+app.post('/admin-settings/update', (req, res) => {
+    const { password, fromEmail, emailPass, apiKey, apiSecret } = req.body;
+    let settings = {};
+    if (fs.existsSync(ADMIN_SETTINGS_FILE)) {
+        try { settings = JSON.parse(fs.readFileSync(ADMIN_SETTINGS_FILE, 'utf8')); } catch { settings = {}; }
+    }
+    if (fromEmail) settings.fromEmail = fromEmail;
+    if (emailPass) settings.emailPass = emailPass;
+    if (apiKey) settings.apiKey = apiKey;
+    if (apiSecret) settings.apiSecret = apiSecret;
+    fs.writeFileSync(ADMIN_SETTINGS_FILE, JSON.stringify(settings, null, 2));
+    // Update in-memory config
+    if (fromEmail) GMAIL_USER = fromEmail;
+    if (emailPass) GMAIL_PASS = emailPass;
+    if (apiKey) process.env.MJ_APIKEY_PUBLIC = apiKey;
+    if (apiSecret) process.env.MJ_APIKEY_PRIVATE = apiSecret;
+    if (password) {
+        process.env.LATEST_PASSWORD = password;
+    }
+    // Recreate transporter if needed
+    if (GMAIL_USER && GMAIL_PASS) {
+        transporter = nodemailer.createTransport({
+            host: 'in-v3.mailjet.com',
+            port: 587,
+            secure: false,
+            auth: { user: GMAIL_USER, pass: GMAIL_PASS }
+        });
+    }
+    res.json({ success: true });
+});
