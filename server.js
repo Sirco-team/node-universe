@@ -1,4 +1,3 @@
-require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
@@ -89,7 +88,7 @@ if (GMAIL_USER && GMAIL_PASS) {
 async function sendVerificationEmail(email, code) {
     if (!transporter) return;
     const mailOptions = {
-        from: GMAIL_USER,
+        from: 'timco307@gmail.com', // Use a valid, verified sender for Mailjet
         to: email,
         subject: 'Your Verification Code',
         text: `Your verification code is: ${code}`
@@ -627,6 +626,43 @@ app.post('/collect', (req, res) => {
 // Serve favicon.ico with 204 No Content
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
+// --- Health check endpoint ---
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// --- Example custom endpoint ---
+app.get('/random-number', (req, res) => {
+    const num = Math.floor(Math.random() * 1000);
+    res.json({ random: num });
+});
+
+// --- Fun custom endpoint ---
+app.get('/pi', (req, res) => {
+    res.json({ pi: Math.PI });
+});
+
+// Node.js version check for Raspberry Pi compatibility
+const requiredNodeVersion = 16;
+const currentMajor = parseInt(process.versions.node.split('.')[0], 10);
+if (currentMajor < requiredNodeVersion) {
+    console.warn(`Warning: Node.js version ${process.versions.node} detected. Please use Node.js ${requiredNodeVersion}.x or newer for best compatibility.`);
+}
+
+// Helper to get local IP address for Pi
+function getLocalIP() {
+    const os = require('os');
+    const ifaces = os.networkInterfaces();
+    for (const iface of Object.values(ifaces)) {
+        for (const info of iface) {
+            if (info.family === 'IPv4' && !info.internal) {
+                return info.address;
+            }
+        }
+    }
+    return 'localhost';
+}
+
 // HTTPS server if certs exist, otherwise HTTP
 if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
     const sslOptions = {
@@ -635,9 +671,11 @@ if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
     };
     https.createServer(sslOptions, app).listen(HTTPS_PORT, () => {
         console.log(`Analytics backend listening on HTTPS port ${HTTPS_PORT}`);
+        console.log(`Access from your Pi's browser: https://` + getLocalIP() + `:${HTTPS_PORT}`);
     });
 } else {
     app.listen(PORT, () => {
         console.log(`Analytics backend listening on HTTP port ${PORT} (SSL certs not found)`);
+        console.log(`Access from your Pi's browser: http://` + getLocalIP() + `:${PORT}`);
     });
 }
