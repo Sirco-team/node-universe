@@ -6,6 +6,7 @@ const fs = require('fs');
 const https = require('https');
 const path = require('path');
 const cookieParser = require('cookie-parser');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 app.use(cors());
@@ -36,6 +37,7 @@ const NEWSLETTER_FILE_PATH = path.join(DATA_DIR, 'newsletter-signups.json');
 const COOKIE_SIGNUP_FILE = path.join(DATA_DIR, 'cookie-signups.json');
 const COOKIE_CLOUD_FILE = path.join(DATA_DIR, 'cookie-cloud.json');
 const BANNED_IPS_FILE = path.join(DATA_DIR, 'banned-ips.json');
+const BANNED_MACS_FILE = path.join(DATA_DIR, 'banned-mac-codes.json');
 const PORT = process.env.PORT || 3443;
 const HTTPS_PORT = process.env.HTTPS_PORT || 3443;
 const SSL_KEY_PATH = process.env.SSL_KEY_PATH || './key.pem';
@@ -128,46 +130,97 @@ app.get('/latest.json', (req, res) => {
 
 // --- Cookie signup endpoint ---
 app.post('/cookie-signup', bannedIPMiddleware, (req, res, next) => {
+    // Permanent ban check (by browser localStorage, see frontend)
+    if (req.body.banned_permanent === '1') {
+        return res.status(403).json({ error: 'This device is permanently banned.' });
+    }
     const data = { ...req.body, timestamp: new Date().toISOString() };
+    // Username validation
+    const username = (data.username || '').toLowerCase();
+    if (!/^[a-z0-9_-]+$/.test(username)) {
+        return res.status(400).json({ error: 'Username must only contain letters, numbers, underscores, or hyphens (no spaces or special characters).'});
+    }
     // Save creation_ip
     if (!data.creation_ip) {
         const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
         data.creation_ip = ip;
     }
-    // Save to DB (example: newsletter-signups.json or your user DB)
+    // Save last_ip_used
+    if (!data.last_ip_used) {
+        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
+        data.last_ip_used = ip;
+    }
+    // Load DB
     let db = {};
     if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
         try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
     }
-    db[data.username] = { ...data, last_ip: data.creation_ip };
-    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
-    // Also log to cookie-signups.json as before
-    try {
-        const content = fs.existsSync(COOKIE_SIGNUP_FILE) ? fs.readFileSync(COOKIE_SIGNUP_FILE, 'utf8') : '';
-        const lines = content.split('\n').filter(line => line.trim());
-        lines.push(JSON.stringify(data));
-        fs.writeFileSync(COOKIE_SIGNUP_FILE, lines.join('\n') + '\n');
-        res.json({ success: true, ...data });
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to save signup' });
+    // Prevent duplicate usernames (case-insensitive)
+    if (Object.keys(db).some(u => u.toLowerCase() === username)) {
+        return res.status(400).json({ error: 'Username already exists.' });
     }
+    // Generate verification code
+    const verification_code = uuidv4().slice(0, 8).toUpperCase();
+    db[data.username] = { ...data, last_ip: data.creation_ip, last_ip_used: data.last_ip_used, verified: false, verification_code };
+    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
+    res.json({ success: true, verification_required: true, message: 'Account created. Please get your verification code from an admin.', verification_code: null });
 });
-
-// --- Cookie verify endpoint (login) ---
-app.post('/cookie-verify', (req, res) => {
-    const { username, password, last_ip } = req.body;
+// --- Verification endpoint ---
+app.post('/verify-account', (req, res) => {
+    const { username, code } = req.body;
+    if (!username || !code) return res.status(400).json({ error: 'Missing username or code' });
     let db = {};
     if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
         try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
     }
     const user = db[username];
+    if (!user || user.verified) return res.status(400).json({ error: 'Invalid or already verified' });
+    if (user.verification_code !== code) return res.status(400).json({ error: 'Incorrect verification code' });
+    user.verified = true;
+    delete user.verification_code;
+    db[username] = user;
+    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
+    res.json({ success: true });
+});
+// --- Ban user endpoint ---
+app.post('/ban-user', (req, res) => {
+    const { username } = req.body;
+    if (!username) return res.status(400).json({ error: 'Missing username' });
+    let db = {};
+    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
+        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
+    }
+    const user = db[username];
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    user.banned = true;
+    db[username] = user;
+    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
+    res.json({ success: true });
+});
+// --- Cookie verify endpoint (login) ---
+app.post('/cookie-verify', (req, res) => {
+    if (req.body.banned_permanent === '1') {
+        return res.status(403).json({ error: 'This device is permanently banned.' });
+    }
+    const { username, password, last_ip, last_ip_used } = req.body;
+    let db = {};
+    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
+        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
+    }
+    const userKey = Object.keys(db).find(u => u.toLowerCase() === (username || '').toLowerCase());
+    const user = db[userKey];
     if (user && user.password === password) {
-        // Update last_ip
-        if (last_ip) {
-            user.last_ip = last_ip;
-            db[username] = user;
-            fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
+        if (user.banned) {
+            return res.status(403).json({ error: 'Account is banned.' });
         }
+        if (!user.verified) {
+            return res.status(403).json({ error: 'Account not verified.' });
+        }
+        // Update last_ip and last_ip_used
+        if (last_ip) user.last_ip = last_ip;
+        if (last_ip_used) user.last_ip_used = last_ip_used;
+        db[userKey] = user;
+        fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
         return res.json({ valid: true, ...user });
     }
     res.json({ valid: false });
@@ -326,6 +379,51 @@ app.post('/unban-ip', (req, res) => {
     let banned = loadBannedIPs();
     banned = banned.filter(item => item !== ip);
     saveBannedIPs(banned);
+    res.json({ success: true, banned });
+});
+
+// --- Banned MAC codes functionality ---
+
+if (!fs.existsSync(BANNED_MACS_FILE)) {
+    fs.writeFileSync(BANNED_MACS_FILE, JSON.stringify([]));
+}
+function loadBannedMacs() {
+    try {
+        return JSON.parse(fs.readFileSync(BANNED_MACS_FILE, 'utf8'));
+    } catch {
+        return [];
+    }
+}
+function saveBannedMacs(macs) {
+    fs.writeFileSync(BANNED_MACS_FILE, JSON.stringify(macs, null, 2));
+}
+function isMacBanned(mac) {
+    const banned = loadBannedMacs();
+    return banned.includes(mac);
+}
+
+// API to get all banned MAC codes
+app.get('/banned-macs', (req, res) => {
+    res.json(loadBannedMacs());
+});
+// API to ban a MAC code (POST, expects {mac})
+app.post('/ban-mac', (req, res) => {
+    const { mac } = req.body;
+    if (!mac) return res.status(400).json({ error: 'No MAC code provided' });
+    const banned = loadBannedMacs();
+    if (!banned.includes(mac)) {
+        banned.push(mac);
+        saveBannedMacs(banned);
+    }
+    res.json({ success: true, banned });
+});
+// API to unban a MAC code (POST, expects {mac})
+app.post('/unban-mac', (req, res) => {
+    const { mac } = req.body;
+    if (!mac) return res.status(400).json({ error: 'No MAC code provided' });
+    let banned = loadBannedMacs();
+    banned = banned.filter(item => item !== mac);
+    saveBannedMacs(banned);
     res.json({ success: true, banned });
 });
 
