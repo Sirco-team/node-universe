@@ -7,6 +7,7 @@ const https = require('https');
 const path = require('path');
 const cookieParser = require('cookie-parser');
 const { v4: uuidv4 } = require('uuid');
+const nodemailer = require('nodemailer');
 
 const app = express();
 app.use(cors());
@@ -46,6 +47,60 @@ const SSL_CERT_PATH = process.env.SSL_CERT_PATH || './cert.pem';
 const LATEST_PASSWORD = process.env.LATEST_PASSWORD || 'letmein';
 const LATEST_COOKIE = 'latest_auth';
 
+// --- Nodemailer Gmail setup ---
+let GMAIL_USER = process.env.GMAIL_USER;
+let GMAIL_PASS = process.env.GMAIL_PASS;
+try {
+    const credsPath = path.join(__dirname, 'gmail_creds.json');
+    if (fs.existsSync(credsPath)) {
+        const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+        if (creds.email && creds.password) {
+            GMAIL_USER = Buffer.from(creds.email, 'base64').toString('utf8');
+            GMAIL_PASS = Buffer.from(creds.password, 'base64').toString('utf8');
+        }
+    }
+} catch (e) {
+    console.error('Failed to load gmail_creds.json:', e);
+}
+
+let transporter = null;
+if (GMAIL_USER && GMAIL_PASS) {
+    transporter = nodemailer.createTransport({
+        host: 'smtp.office365.com',
+        port: 587,
+        secure: false, // use TLS
+        auth: {
+            user: GMAIL_USER,
+            pass: GMAIL_PASS
+        }
+    });
+    transporter.verify(function(error, success) {
+        if (error) {
+            console.error('Outlook transporter could not connect or authenticate:', error.message || error);
+            console.error('Email sending will be disabled, but the server will continue running.');
+            transporter = null;
+        } else {
+            console.log('Outlook transporter is ready to send emails.');
+        }
+    });
+}
+
+// Helper to send verification email
+async function sendVerificationEmail(email, code) {
+    if (!transporter) return;
+    const mailOptions = {
+        from: GMAIL_USER,
+        to: email,
+        subject: 'Your Verification Code',
+        text: `Your verification code is: ${code}`
+    };
+    try {
+        await transporter.sendMail(mailOptions);
+    } catch (err) {
+        console.error('Failed to send verification email:', err);
+    }
+}
+
 // Helper: check password from query, body, or cookie
 function checkLatestPassword(req) {
     const pwd = req.body?.password || req.query?.password || req.cookies?.[LATEST_COOKIE];
@@ -83,7 +138,8 @@ app.get('/latest.json', (req, res) => {
             try {
                 const db = loadNewsletterDB();
                 const arr = Object.values(db).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-                return res.json(arr);
+                // Change label in response
+                return res.json({ label: "Account Sign Ups", data: arr });
             } catch (err) {
                 return res.status(500).json({ error: 'Failed to load newsletter data' });
             }
@@ -129,7 +185,7 @@ app.get('/latest.json', (req, res) => {
 });
 
 // --- Cookie signup endpoint ---
-app.post('/cookie-signup', bannedIPMiddleware, (req, res, next) => {
+app.post('/cookie-signup', bannedIPMiddleware, async (req, res, next) => {
     // Permanent ban check (by browser localStorage, see frontend)
     if (req.body.banned_permanent === '1') {
         return res.status(403).json({ error: 'This device is permanently banned.' });
@@ -163,7 +219,11 @@ app.post('/cookie-signup', bannedIPMiddleware, (req, res, next) => {
     const verification_code = uuidv4().slice(0, 8).toUpperCase();
     db[data.username] = { ...data, last_ip: data.creation_ip, last_ip_used: data.last_ip_used, verified: false, verification_code };
     fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
-    res.json({ success: true, verification_required: true, message: 'Account created. Please get your verification code from an admin.', verification_code: null });
+    // Send verification code to email if provided
+    if (data.email) {
+        await sendVerificationEmail(data.email, verification_code);
+    }
+    res.json({ success: true, verification_required: true, message: 'Account created. Please check your email for the verification code.', verification_code: null });
 });
 // --- Verification endpoint ---
 app.post('/verify-account', (req, res) => {
