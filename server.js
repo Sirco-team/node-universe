@@ -49,6 +49,7 @@ if (currentMajor < requiredNodeVersion) {
 // --- Email Configuration ---
 let GMAIL_USER = process.env.GMAIL_USER;
 let GMAIL_PASS = process.env.GMAIL_PASS;
+let apiKeys = [];
 try {
     const credsPath = path.join(__dirname, 'gmail_creds.json');
     if (fs.existsSync(credsPath)) {
@@ -56,32 +57,64 @@ try {
         if (creds.email && creds.password) {
             GMAIL_USER = creds.email;
             GMAIL_PASS = creds.password;
+            apiKeys.push({ user: creds.email, pass: creds.password });
+        }
+    }
+    // Load additional API keys from admin-settings.json if available
+    const adminSettingsPath = path.join(DATA_DIR, 'admin-settings.json');
+    if (fs.existsSync(adminSettingsPath)) {
+        const settings = JSON.parse(fs.readFileSync(adminSettingsPath, 'utf8'));
+        if (settings.apiKey && settings.apiSecret) {
+            apiKeys.push({ user: settings.apiKey, pass: settings.apiSecret });
+        }
+        // Optionally support multiple keys as an array
+        if (Array.isArray(settings.extraMailjetKeys)) {
+            for (const k of settings.extraMailjetKeys) {
+                if (k.user && k.pass) apiKeys.push({ user: k.user, pass: k.pass });
+            }
         }
     }
 } catch (e) {
-    console.error('Failed to load gmail_creds.json:', e);
+    console.error('Failed to load gmail_creds.json or admin-settings.json:', e);
 }
 
 let transporter = null;
-if (GMAIL_USER && GMAIL_PASS) {
-    transporter = nodemailer.createTransport({
+let currentApiIndex = 0;
+function createTransporter(index = 0) {
+    if (!apiKeys[index]) return null;
+    return nodemailer.createTransport({
         host: 'in-v3.mailjet.com',
         port: 587,
         secure: false, // TLS
         auth: {
-            user: GMAIL_USER,
-            pass: GMAIL_PASS
+            user: apiKeys[index].user,
+            pass: apiKeys[index].pass
         }
     });
+}
+function verifyAndSetTransporter(index = 0) {
+    if (!apiKeys[index]) {
+        transporter = null;
+        return;
+    }
+    transporter = createTransporter(index);
     transporter.verify(function(error, success) {
         if (error) {
             console.error('Mailjet transporter could not connect or authenticate:', error.message || error);
-            console.error('Email sending will be disabled, but the server will continue running.');
-            transporter = null;
+            if (index + 1 < apiKeys.length) {
+                console.log('Trying next Mailjet API key...');
+                verifyAndSetTransporter(index + 1);
+            } else {
+                console.error('All Mailjet API keys failed. Email sending will be disabled.');
+                transporter = null;
+            }
         } else {
-            console.log('Mailjet transporter is ready to send emails.');
+            console.log('Mailjet transporter is ready to send emails. Using API key:', apiKeys[index].user);
         }
     });
+}
+if (apiKeys.length > 0) {
+    verifyAndSetTransporter(0);
 }
 
 // Helper to send verification email
@@ -234,6 +267,30 @@ function bannedIPMiddleware(req, res, next) {
     next();
 }
 
+// --- Import routes and helpers ---
+const routes = require('./routes');
+const helpers = require('./helpers');
+const banUser = require('./endpoints/ban-user');
+const verifyAccount = require('./endpoints/verify-account');
+const deleteUser = require('./endpoints/delete-user');
+const cookieVerify = require('./endpoints/cookie-verify');
+const sendNewsletter = require('./endpoints/send-newsletter');
+const accountSignup = require('./endpoints/account-signup');
+const collect = require('./endpoints/collect');
+const bannedIps = require('./endpoints/banned-ips');
+const bannedMacs = require('./endpoints/banned-macs');
+const unbanIp = require('./endpoints/unban-ip');
+const unbanMac = require('./endpoints/unban-mac');
+const latestJson = require('./endpoints/latest-json');
+const cookieSignup = require('./endpoints/cookie-signup');
+const tempBanUser = require('./endpoints/temp-ban-user');
+const adminSettings = require('./endpoints/admin-settings');
+const adminSettingsUpdate = require('./endpoints/admin-settings-update');
+const bannedAccounts = require('./endpoints/banned-accounts');
+
+// --- Use routes ---
+routes(app, helpers);
+
 // --- Routes ---
 // --- Ensure all critical endpoints exist and are correct ---
 // Root endpoint
@@ -267,102 +324,21 @@ app.get('/my-ip', (req, res) => {
 });
 
 // /account-signup
-app.post('/account-signup', bannedIPMiddleware, async (req, res) => {
-    if (req.body.banned_permanent === '1') {
-        return res.status(403).json({ error: 'This device is permanently banned.' });
-    }
-    const data = { ...req.body, timestamp: new Date().toISOString() };
-    const username = (data.username || '').toLowerCase();
-    if (!/^[a-z0-9_-]+$/.test(username)) {
-        return res.status(400).json({ error: 'Username must only contain letters, numbers, underscores, or hyphens (no spaces or special characters).'});
-    }
-    if (!data.creation_ip) {
-        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
-        data.creation_ip = ip;
-    }
-    if (!data.last_ip_used) {
-        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
-        data.last_ip_used = ip;
-    }
-    const ACCOUNTS_FILE_PATH = path.join(DATA_DIR, 'account-signups.json');
-    let db = {};
-    if (fs.existsSync(ACCOUNTS_FILE_PATH)) {
-        try { db = JSON.parse(fs.readFileSync(ACCOUNTS_FILE_PATH, 'utf8')); } catch { db = {}; }
-    }
-    if (Object.keys(db).some(u => u.toLowerCase() === username)) {
-        return res.status(400).json({ error: 'Username already exists.' });
-    }
-    const verification_code = uuidv4().slice(0, 8).toUpperCase();
-    db[data.username] = { ...data, last_ip: data.creation_ip, last_ip_used: data.last_ip_used, verified: false, verification_code };
-    fs.writeFileSync(ACCOUNTS_FILE_PATH, JSON.stringify(db, null, 2));
-    if (data.email) {
-        await sendVerificationEmail(data.email, verification_code);
-    }
-    res.json({ success: true, verification_required: true, message: 'Account created. Please check your email for the verification code.', verification_code: null });
-});
+app.post('/account-signup', bannedIPMiddleware, accountSignup);
 
 // /collect
-app.post('/collect', (req, res) => {
-    const entry = {
-        ...req.body,
-        timestamp: new Date().toISOString(),
-        ip: req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress
-    };
-    try {
-        fs.appendFileSync(LOG_FILE_PATH, JSON.stringify(entry) + '\n');
-        res.json({ success: true });
-    } catch (e) {
-        res.status(500).json({ error: 'Failed to save analytics' });
-    }
-});
+app.post('/collect', collect);
 
 // /banned-ips
-app.get('/banned-ips', (req, res) => {
-    let ips = [];
-    if (fs.existsSync(BANNED_IPS_FILE)) {
-        try { ips = JSON.parse(fs.readFileSync(BANNED_IPS_FILE, 'utf8')); } catch { ips = []; }
-    }
-    res.json(ips);
-});
+app.get('/banned-ips', bannedIps);
 // /banned-macs
-app.get('/banned-macs', (req, res) => {
-    let macs = [];
-    if (fs.existsSync(BANNED_MACS_FILE)) {
-        try { macs = JSON.parse(fs.readFileSync(BANNED_MACS_FILE, 'utf8')); } catch { macs = []; }
-    }
-    res.json(macs);
-});
+app.get('/banned-macs', bannedMacs);
 // /unban-ip
-app.post('/unban-ip', (req, res) => {
-    const { ip } = req.body;
-    if (!ip) return res.status(400).json({ error: 'Missing IP' });
-    let ips = [];
-    if (fs.existsSync(BANNED_IPS_FILE)) {
-        try { ips = JSON.parse(fs.readFileSync(BANNED_IPS_FILE, 'utf8')); } catch { ips = []; }
-    }
-    ips = ips.filter(x => x !== ip);
-    fs.writeFileSync(BANNED_IPS_FILE, JSON.stringify(ips, null, 2));
-    res.json({ success: true });
-});
+app.post('/unban-ip', unbanIp);
 // /unban-mac
-app.post('/unban-mac', (req, res) => {
-    const { mac } = req.body;
-    if (!mac) return res.status(400).json({ error: 'Missing MAC' });
-    let macs = [];
-    if (fs.existsSync(BANNED_MACS_FILE)) {
-        try { macs = JSON.parse(fs.readFileSync(BANNED_MACS_FILE, 'utf8')); } catch { macs = []; }
-    }
-    macs = macs.filter(x => x !== mac);
-    fs.writeFileSync(BANNED_MACS_FILE, JSON.stringify(macs, null, 2));
-    res.json({ success: true });
-});
+app.post('/unban-mac', unbanMac);
 
-// --- Data endpoints for /latest tabs (all password protected) ---
-function loadNewsletterDB() {
-    if (!fs.existsSync(NEWSLETTER_FILE_PATH)) return {};
-    try { return JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { return {}; }
-}
-
+// /latest.json
 app.get('/latest.json', (req, res) => {
     if (!checkLatestPassword(req)) {
         return res.status(403).json({ error: 'Forbidden: Invalid or missing password' });
@@ -461,37 +437,11 @@ app.post('/cookie-signup', bannedIPMiddleware, async (req, res, next) => {
     res.json({ success: true, verification_required: true, message: 'Account created. Please check your email for the verification code.', verification_code: null });
 });
 // --- Verification endpoint ---
-app.post('/verify-account', (req, res) => {
-    const { username, code } = req.body;
-    if (!username || !code) return res.status(400).json({ error: 'Missing username or code' });
-    let db = {};
-    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
-        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
-    }
-    const user = db[username];
-    if (!user || user.verified) return res.status(400).json({ error: 'Invalid or already verified' });
-    if (user.verification_code !== code) return res.status(400).json({ error: 'Incorrect verification code' });
-    user.verified = true;
-    delete user.verification_code;
-    db[username] = user;
-    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
-    res.json({ success: true });
-});
+app.post('/verify-account', verifyAccount);
+
 // --- Ban user endpoint ---
-app.post('/ban-user', (req, res) => {
-    const { username } = req.body;
-    if (!username) return res.status(400).json({ error: 'Missing username' });
-    let db = {};
-    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
-        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
-    }
-    const user = db[username];
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    user.banned = true;
-    db[username] = user;
-    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
-    res.json({ success: true });
-});
+app.post('/ban-user', banUser);
+
 // --- Temp ban endpoint ---
 app.post('/temp-ban-user', (req, res) => {
     const { username, duration } = req.body; // duration in ms
@@ -558,7 +508,6 @@ app.post('/cookie-verify', (req, res) => {
     fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
     return res.json({ valid: true, ...user });
 });
-
 // --- Send newsletter email to all signups ---
 app.post('/send-newsletter', async (req, res) => {
     const { subject, message } = req.body;
@@ -654,23 +603,30 @@ app.post('/banned-accounts', (req, res) => {
     res.json({ banned, temp_banned });
 });
 
-// --- Create admin-settings.json if missing ---
+// --- Create email_creds.json if missing or update from admin-settings.json ---
+const EMAIL_CREDS_PATH = path.join(__dirname, 'email_creds.json');
 const ADMIN_SETTINGS_FILE = path.join(DATA_DIR, 'admin-settings.json');
-if (!fs.existsSync(ADMIN_SETTINGS_FILE)) {
-    let creds = { email: '', password: '' };
+if (fs.existsSync(ADMIN_SETTINGS_FILE)) {
     try {
-        const credsPath = path.join(__dirname, 'gmail_creds.json');
-        if (fs.existsSync(credsPath)) {
-            creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-        }
-    } catch (e) {}
-    fs.writeFileSync(ADMIN_SETTINGS_FILE, JSON.stringify({
-        fromEmail: creds.email || 'thereal.verify.universe@gmail.com',
-        apiKey: creds.email || '',
-        apiSecret: creds.password || ''
-    }, null, 2));
-    console.log('Created admin-settings.json in data directory.');
+        const settings = JSON.parse(fs.readFileSync(ADMIN_SETTINGS_FILE, 'utf8'));
+        const emailCreds = {
+            email: settings.apiKey || settings.fromEmail || '',
+            password: settings.apiSecret || ''
+        };
+        fs.writeFileSync(EMAIL_CREDS_PATH, JSON.stringify(emailCreds, null, 2));
+        // Optionally, remove sensitive fields from admin-settings.json
+        delete settings.apiKey;
+        delete settings.apiSecret;
+        fs.writeFileSync(ADMIN_SETTINGS_FILE, JSON.stringify(settings, null, 2));
+    } catch (e) {
+        console.error('Failed to migrate admin-settings.json to email_creds.json:', e);
+    }
 }
+
+// --- Remove admin-settings.json if it exists ---
+try {
+    fs.unlinkSync(path.join(DATA_DIR, 'admin-settings.json'));
+} catch {}
 
 // --- Fix: Declare TRAFFIC_MODE variable ---
 let TRAFFIC_MODE = null;
@@ -693,51 +649,10 @@ if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
 }
 
 // --- Banned IPs endpoint ---
-app.get('/banned-ips', (req, res) => {
-    let ips = [];
-    if (fs.existsSync(BANNED_IPS_FILE)) {
-        try { ips = JSON.parse(fs.readFileSync(BANNED_IPS_FILE, 'utf8')); } catch { ips = []; }
-    }
-    res.json(ips);
-});
+// (Moved to endpoints/banned-ips.js)
 // --- Banned MACs endpoint ---
-app.get('/banned-macs', (req, res) => {
-    let macs = [];
-    if (fs.existsSync(BANNED_MACS_FILE)) {
-        try { macs = JSON.parse(fs.readFileSync(BANNED_MACS_FILE, 'utf8')); } catch { macs = []; }
-    }
-    res.json(macs);
-});
+// (Moved to endpoints/banned-macs.js)
 // --- Unban IP endpoint ---
-app.post('/unban-ip', (req, res) => {
-    const { ip } = req.body;
-    if (!ip) return res.status(400).json({ error: 'Missing IP' });
-    let ips = [];
-    if (fs.existsSync(BANNED_IPS_FILE)) {
-        try { ips = JSON.parse(fs.readFileSync(BANNED_IPS_FILE, 'utf8')); } catch { ips = []; }
-    }
-    ips = ips.filter(x => x !== ip);
-    fs.writeFileSync(BANNED_IPS_FILE, JSON.stringify(ips, null, 2));
-    res.json({ success: true });
-});
+// (Moved to endpoints/unban-ip.js)
 // --- Unban MAC endpoint ---
-app.post('/unban-mac', (req, res) => {
-    const { mac } = req.body;
-    if (!mac) return res.status(400).json({ error: 'Missing MAC' });
-    let macs = [];
-    if (fs.existsSync(BANNED_MACS_FILE)) {
-        try { macs = JSON.parse(fs.readFileSync(BANNED_MACS_FILE, 'utf8')); } catch { macs = []; }
-    }
-    macs = macs.filter(x => x !== mac);
-    fs.writeFileSync(BANNED_MACS_FILE, JSON.stringify(macs, null, 2));
-    res.json({ success: true });
-});
-
-// --- If you are having trouble, check the following: ---
-// 1. Make sure all required files exist in the /data directory (analytics-log.json, newsletter-signups.json, etc.)
-// 2. Make sure your server is running and listening on the correct port.
-// 3. Check the terminal for any errors or stack traces.
-// 4. If an endpoint is not working, verify its route and method (GET/POST) match your frontend code.
-// 5. If you get 404 or 500 errors, check for typos in endpoint names and file paths.
-// 6. If you change environment variables, restart the server.
-// 7. If you need to debug, add console.log statements to see request data and flow.
+// (Moved to endpoints/unban-mac.js)
