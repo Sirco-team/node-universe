@@ -228,6 +228,12 @@ app.use((req, res, next) => {
     next();
 });
 
+// --- Middleware to block banned IPs (no-op if not used) ---
+function bannedIPMiddleware(req, res, next) {
+    // You can implement IP ban logic here if needed
+    next();
+}
+
 // --- Routes ---
 // Root endpoint
 app.get('/', (req, res) => {
@@ -464,123 +470,8 @@ app.post('/cookie-verify', (req, res) => {
     res.json({ valid: false });
 });
 
-// --- Traffic Monitoring Menu ---
-const TRAFFIC_MODE = {
-    current: null // null = off, 'all', 'analytics', 'newsletter', etc.
-};
-
-function printMenu() {
-    console.log('\n=== Traffic Monitor Menu ===');
-    console.log('1. View ALL traffic');
-    console.log('2. View only Analytics traffic');
-    console.log('3. View only Newsletter traffic');
-    console.log('4. View only Cookie Signup traffic');
-    console.log('5. View only Cookie Cloud traffic');
-    console.log('6. View only Shortener traffic');
-    console.log('0. Stop viewing traffic');
-    console.log('q. Quit menu');
-    console.log('===========================');
-    process.stdout.write('Select option: ');
-}
-
-function setTrafficMode(mode) {
-    TRAFFIC_MODE = mode;
-    if (mode === null) {
-        console.log('\n[Monitor] Traffic viewing stopped.');
-    } else {
-        console.log(`\n[Monitor] Now viewing: ${mode === 'all' ? 'ALL traffic' : mode + ' traffic only'}`);
-    }
-}
-
-function startMenu() {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    printMenu();
-    rl.on('line', (input) => {
-        switch (input.trim()) {
-            case '1': setTrafficMode('all'); break;
-            case '2': setTrafficMode('analytics'); break;
-            case '3': setTrafficMode('newsletter'); break;
-            case '4': setTrafficMode('cookie-signup'); break;
-            case '5': setTrafficMode('cookie-cloud'); break;
-            case '6': setTrafficMode('shortener'); break;
-            case '0': setTrafficMode(null); break;
-            case 'q': rl.close(); return;
-            default: console.log('Invalid option.');
-        }
-        printMenu();
-    });
-}
-
-// Helper to match route type for traffic filtering
-function getTrafficType(req) {
-    const url = req.originalUrl.split('?')[0];
-    if (url.startsWith('/collect')) return 'analytics';
-    if (url.startsWith('/newsletter')) return 'newsletter';
-    if (url.startsWith('/cookie-signup')) return 'cookie-signup';
-    if (url.startsWith('/cookie-cloud')) return 'cookie-cloud';
-    if (url.startsWith('/shortener')) return 'shortener';
-    return 'other';
-}
-
-// Log all incoming requests and outgoing responses (with menu filtering)
-app.use((req, res, next) => {
-    const type = getTrafficType(req);
-    const shouldLog = TRAFFIC_MODE === 'all' || TRAFFIC_MODE === type;
-    // Log incoming request
-    if (shouldLog) {
-        console.log(`\n[IN] ${req.method} ${req.originalUrl}`);
-        if (Object.keys(req.body || {}).length > 0) {
-            console.log('[IN] Body:', JSON.stringify(req.body, null, 2));
-        }
-        if (Object.keys(req.query || {}).length > 0) {
-            console.log('[IN] Query:', JSON.stringify(req.query, null, 2));
-        }
-    }
-
-    // Wrap res.json and res.send to log outgoing data
-    const origJson = res.json;
-    const origSend = res.send;
-    res.json = function (data) {
-        if (shouldLog) {
-            console.log(`[OUT] ${req.method} ${req.originalUrl} -> Status: ${res.statusCode}`);
-            console.log('[OUT] JSON:', JSON.stringify(data, null, 2));
-        }
-        return origJson.call(this, data);
-    };
-    res.send = function (data) {
-        if (shouldLog) {
-            console.log(`[OUT] ${req.method} ${req.originalUrl} -> Status: ${res.statusCode}`);
-            let out = data;
-            if (typeof data !== 'string') {
-                try { out = JSON.stringify(data, null, 2); } catch {}
-            }
-            if (typeof out === 'string' && out.length > 1000) {
-                out = out.slice(0, 1000) + '... [truncated]';
-            }
-            console.log('[OUT] Body:', out);
-        }
-        return origSend.call(this, data);
-    };
-    next();
-});
-
-
-// --- Server Startup ---
-if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
-    const sslOptions = {
-        key: fs.readFileSync(SSL_KEY_PATH),
-        cert: fs.readFileSync(SSL_CERT_PATH)
-    };
-    https.createServer(sslOptions, app).listen(HTTPS_PORT, () => {
-        console.log(`Analytics backend listening on HTTPS port ${HTTPS_PORT}`);
-        console.log(`Access from your Pi's browser: https://` + getLocalIP() + `:${HTTPS_PORT}`);
-    });
-} else {
-    app.listen(PORT, () => {
-        console.log(`Analytics backend listening on HTTP port ${PORT} (SSL certs not found)`);
-        console.log(`Access from your Pi's browser: http://` + getLocalIP() + `:${PORT}`);
-    });
-}
+// --- Add missing ADMIN_SETTINGS_FILE declaration ---
+const ADMIN_SETTINGS_FILE = path.join(DATA_DIR, 'admin-settings.json');
 
 // --- Send newsletter email to all signups ---
 app.post('/send-newsletter', async (req, res) => {
@@ -598,7 +489,7 @@ app.post('/send-newsletter', async (req, res) => {
     try {
         for (const email of recipients) {
             await transporter.sendMail({
-                from: 'timco307@gmail.com',
+                from: 'thereal.verify.universe@gmail.com',
                 to: email,
                 subject,
                 text: message,
