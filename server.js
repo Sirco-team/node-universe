@@ -732,3 +732,12 @@ app.post('/unban-mac', (req, res) => {
     fs.writeFileSync(BANNED_MACS_FILE, JSON.stringify(macs, null, 2));
     res.json({ success: true });
 });
+
+// --- If you are having trouble, check the following: ---
+// 1. Make sure all required files exist in the /data directory (analytics-log.json, newsletter-signups.json, etc.)
+// 2. Make sure your server is running and listening on the correct port.
+// 3. Check the terminal for any errors or stack traces.
+// 4. If an endpoint is not working, verify its route and method (GET/POST) match your frontend code.
+// 5. If you get 404 or 500 errors, check for typos in endpoint names and file paths.
+// 6. If you change environment variables, restart the server.
+// 7. If you need to debug, add console.log statements to see request data and flow.
