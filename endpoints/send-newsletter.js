@@ -2,23 +2,24 @@
 const fs = require('fs');
 const path = require('path');
 const NEWSLETTER_FILE_PATH = path.join(__dirname, '../data/newsletter-signups.json');
-let transporter;
-try {
-    transporter = require('../server').transporter;
-} catch {}
+const { transporter } = require('../email');
 
 module.exports = async (req, res) => {
     const { subject, message } = req.body;
     if (!subject || !message) return res.status(400).json({ error: 'Missing subject or message' });
     if (!transporter) return res.status(500).json({ error: 'Email not configured' });
+
     let db = {};
     if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
         try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
     }
+
     const recipients = Object.values(db)
         .filter(u => u.email && u.verified)
         .map(u => u.email);
+
     if (recipients.length === 0) return res.status(400).json({ error: 'No verified emails to send to' });
+
     try {
         for (const email of recipients) {
             await transporter.sendMail({

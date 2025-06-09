@@ -261,32 +261,59 @@ app.use((req, res, next) => {
     next();
 });
 
+// --- Import ban system ---
+const banSystem = require('./ban-system');
+// Use bannedIPMiddleware from ban-system
+app.use(banSystem.bannedIPMiddleware);
+
 // --- Middleware to block banned IPs (no-op if not used) ---
 function bannedIPMiddleware(req, res, next) {
-    // You can implement IP ban logic here if needed
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
+    let bannedIPs = [];
+    if (fs.existsSync(BANNED_IPS_FILE)) {
+        try { bannedIPs = JSON.parse(fs.readFileSync(BANNED_IPS_FILE, 'utf8')); } catch { bannedIPs = []; }
+    }
+    
+    const now = Date.now();
+    const banned = bannedIPs.find(b => b.ip === ip && (b.until === -1 || b.until > now));
+    
+    if (banned) {
+        if (banned.until === -1) {
+            return res.status(403).json({ error: 'This IP is permanently banned.', reason: banned.reason });
+        }
+        return res.status(403).json({ 
+            error: 'This IP is temporarily banned.', 
+            reason: banned.reason,
+            until: banned.until
+        });
+    }
     next();
 }
 
 // --- Import routes and helpers ---
 const routes = require('./routes');
 const helpers = require('./helpers');
-const banUser = require('./endpoints/ban-user');
-const verifyAccount = require('./endpoints/verify-account');
-const deleteUser = require('./endpoints/delete-user');
-const cookieVerify = require('./endpoints/cookie-verify');
-const sendNewsletter = require('./endpoints/send-newsletter');
-const accountSignup = require('./endpoints/account-signup');
-const collect = require('./endpoints/collect');
-const bannedIps = require('./endpoints/banned-ips');
-const bannedMacs = require('./endpoints/banned-macs');
-const unbanIp = require('./endpoints/unban-ip');
-const unbanMac = require('./endpoints/unban-mac');
-const latestJson = require('./endpoints/latest-json');
-const cookieSignup = require('./endpoints/cookie-signup');
-const tempBanUser = require('./endpoints/temp-ban-user');
-const adminSettings = require('./endpoints/admin-settings');
-const adminSettingsUpdate = require('./endpoints/admin-settings-update');
-const bannedAccounts = require('./endpoints/banned-accounts');
+
+// --- Import all endpoints ---
+const endpoints = {
+    banUser: require('./endpoints/ban-user'),
+    verifyAccount: require('./endpoints/verify-account'),
+    deleteUser: require('./endpoints/delete-user'),
+    cookieVerify: require('./endpoints/cookie-verify'),
+    sendNewsletter: require('./endpoints/send-newsletter'),
+    accountSignup: require('./endpoints/account-signup'),
+    collect: require('./endpoints/collect'),
+    bannedIps: require('./endpoints/banned-ips'),
+    bannedMacs: require('./endpoints/banned-macs'),
+    unbanIp: require('./endpoints/unban-ip'),
+    unbanMac: require('./endpoints/unban-mac'),
+    latestJson: require('./endpoints/latest-json'),
+    cookieSignup: require('./endpoints/cookie-signup'),
+    tempBanUser: require('./endpoints/temp-ban-user'),
+    adminSettings: require('./endpoints/admin-settings'),
+    adminSettingsUpdate: require('./endpoints/admin-settings-update'),
+    bannedAccounts: require('./endpoints/banned-accounts')
+};
 
 // --- Use routes ---
 routes(app, helpers);
@@ -603,33 +630,13 @@ app.post('/banned-accounts', (req, res) => {
     res.json({ banned, temp_banned });
 });
 
-// --- Create email_creds.json if missing or update from admin-settings.json ---
-const EMAIL_CREDS_PATH = path.join(__dirname, 'email_creds.json');
-const ADMIN_SETTINGS_FILE = path.join(DATA_DIR, 'admin-settings.json');
-if (fs.existsSync(ADMIN_SETTINGS_FILE)) {
-    try {
-        const settings = JSON.parse(fs.readFileSync(ADMIN_SETTINGS_FILE, 'utf8'));
-        const emailCreds = {
-            email: settings.apiKey || settings.fromEmail || '',
-            password: settings.apiSecret || ''
-        };
-        fs.writeFileSync(EMAIL_CREDS_PATH, JSON.stringify(emailCreds, null, 2));
-        // Optionally, remove sensitive fields from admin-settings.json
-        delete settings.apiKey;
-        delete settings.apiSecret;
-        fs.writeFileSync(ADMIN_SETTINGS_FILE, JSON.stringify(settings, null, 2));
-    } catch (e) {
-        console.error('Failed to migrate admin-settings.json to email_creds.json:', e);
-    }
-}
-
-// --- Remove admin-settings.json if it exists ---
-try {
-    fs.unlinkSync(path.join(DATA_DIR, 'admin-settings.json'));
-} catch {}
+// All email configuration is now handled in email.js
 
 // --- Fix: Declare TRAFFIC_MODE variable ---
 let TRAFFIC_MODE = null;
+
+// Import ban system
+const { banIP, bannedIPMiddleware } = require('./ban-system');
 
 // --- Start HTTP or HTTPS server ---
 if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {

@@ -4,9 +4,9 @@ const path = require('path');
 const BANNED_MACS_FILE = path.join(__dirname, '../data/banned-mac-codes.json');
 
 module.exports = (req, res) => {
-    let macs = [];
+    let bannedMACs = [];
     if (fs.existsSync(BANNED_MACS_FILE)) {
-        try { macs = JSON.parse(fs.readFileSync(BANNED_MACS_FILE, 'utf8')); } catch { macs = []; }
+        try { bannedMACs = JSON.parse(fs.readFileSync(BANNED_MACS_FILE, 'utf8')); } catch { bannedMACs = []; }
     }
-    res.json(macs);
+    res.json(bannedMACs);
 };
