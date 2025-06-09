@@ -39,6 +39,7 @@
     <span class="tab" data-type="files">Files</span>
     <span class="tab" data-type="accounts">Accounts</span>
     <span class="tab" data-type="admin">Admin</span>
+    <span class="tab" data-type="banned-devices">Banned Devices</span>
     <div id="newsletter-email" style="display:none;margin:1em 0;padding:1em;background:#f4f8ff;border-radius:6px;">
       <h3>Send Email to All Newsletter Signups</h3>
       <input id="newsletter-subject" type="text" placeholder="Subject" style="width:60%;margin-bottom:0.5em;"><br>
@@ -129,7 +130,15 @@
 
     function showTab(type) {
       currentType = type;
-      if (type === 'files') {
+      if (type === 'banned-devices') {
+        document.getElementById('entries').style.display = 'block';
+        document.getElementById('status').style.display = 'block';
+        document.getElementById('filelist').style.display = 'none';
+        document.getElementById('fileedit').style.display = 'none';
+        document.getElementById('newsletter-email').style.display = 'none';
+        document.getElementById('admin-settings').style.display = 'none';
+        fetchBannedDevices();
+      } else if (type === 'files') {
         document.getElementById('entries').style.display = 'none';
         document.getElementById('status').style.display = 'none';
         document.getElementById('filelist').style.display = 'block';
@@ -354,6 +363,52 @@
       } catch {
         document.getElementById('admin-settings-status').textContent = 'Failed to save.';
       }
+    }
+
+    async function fetchBannedDevices() {
+      try {
+        const res = await fetch('/banned-ips', { credentials: 'same-origin' });
+        const ips = await res.json();
+        const macRes = await fetch('/banned-macs', { credentials: 'same-origin' });
+        const macs = await macRes.json();
+        let html = '<h3>Banned IPs</h3>';
+        if (Array.isArray(ips) && ips.length > 0) {
+          html += ips.map(ip => `<div style='margin-bottom:0.5em;'>${ip} <button onclick="unbanIP('${ip}')">Unban</button></div>`).join('');
+        } else {
+          html += '<div>No banned IPs.</div>';
+        }
+        html += '<h3 style="margin-top:1.5em;">Banned MAC Codes</h3>';
+        if (Array.isArray(macs) && macs.length > 0) {
+          html += macs.map(mac => `<div style='margin-bottom:0.5em;'>${mac} <button onclick="unbanMAC('${mac}')">Unban</button></div>`).join('');
+        } else {
+          html += '<div>No banned MAC codes.</div>';
+        }
+        document.getElementById('entries').innerHTML = html;
+        document.getElementById('status').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+      } catch {
+        document.getElementById('entries').innerHTML = 'Failed to load banned devices.';
+        document.getElementById('status').textContent = '';
+      }
+    }
+
+    async function unbanIP(ip) {
+      if (!confirm('Unban IP ' + ip + '?')) return;
+      await fetch('/unban-ip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip })
+      });
+      fetchBannedDevices();
+    }
+
+    async function unbanMAC(mac) {
+      if (!confirm('Unban MAC ' + mac + '?')) return;
+      await fetch('/unban-mac', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mac })
+      });
+      fetchBannedDevices();
     }
 
     // Initialize
