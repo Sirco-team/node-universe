@@ -235,6 +235,7 @@ function bannedIPMiddleware(req, res, next) {
 }
 
 // --- Routes ---
+// --- Ensure all critical endpoints exist and are correct ---
 // Root endpoint
 app.get('/', (req, res) => {
     res.send('Server is running');
@@ -243,7 +244,7 @@ app.get('/', (req, res) => {
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- Serve /latest as a single-page app (with or without query params) ---
+// /latest and /latest.html
 app.get('/latest', (req, res) => {
     const latestPath = path.resolve(__dirname, 'latest.html');
     if (!fs.existsSync(latestPath)) {
@@ -259,20 +260,101 @@ app.get('/latest.html', (req, res) => {
     res.sendFile(latestPath);
 });
 
-// Password auth endpoint for /latest (POST)
-app.post('/latest-auth', (req, res) => {
-    const { password } = req.body;
-    if (password === LATEST_PASSWORD) {
-        // Set cookie for both HTTP and HTTPS
-        const cookieOptions = {
-            httpOnly: true,
-            sameSite: req.secure ? 'none' : 'lax',
-            secure: !!req.secure || req.headers['x-forwarded-proto'] === 'https'
-        };
-        res.cookie(LATEST_COOKIE, password, cookieOptions);
-        return res.json({ ok: true });
+// /my-ip
+app.get('/my-ip', (req, res) => {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
+    res.json({ ip });
+});
+
+// /account-signup
+app.post('/account-signup', bannedIPMiddleware, async (req, res) => {
+    if (req.body.banned_permanent === '1') {
+        return res.status(403).json({ error: 'This device is permanently banned.' });
     }
-    res.status(401).json({ ok: false });
+    const data = { ...req.body, timestamp: new Date().toISOString() };
+    const username = (data.username || '').toLowerCase();
+    if (!/^[a-z0-9_-]+$/.test(username)) {
+        return res.status(400).json({ error: 'Username must only contain letters, numbers, underscores, or hyphens (no spaces or special characters).'});
+    }
+    if (!data.creation_ip) {
+        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
+        data.creation_ip = ip;
+    }
+    if (!data.last_ip_used) {
+        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
+        data.last_ip_used = ip;
+    }
+    const ACCOUNTS_FILE_PATH = path.join(DATA_DIR, 'account-signups.json');
+    let db = {};
+    if (fs.existsSync(ACCOUNTS_FILE_PATH)) {
+        try { db = JSON.parse(fs.readFileSync(ACCOUNTS_FILE_PATH, 'utf8')); } catch { db = {}; }
+    }
+    if (Object.keys(db).some(u => u.toLowerCase() === username)) {
+        return res.status(400).json({ error: 'Username already exists.' });
+    }
+    const verification_code = uuidv4().slice(0, 8).toUpperCase();
+    db[data.username] = { ...data, last_ip: data.creation_ip, last_ip_used: data.last_ip_used, verified: false, verification_code };
+    fs.writeFileSync(ACCOUNTS_FILE_PATH, JSON.stringify(db, null, 2));
+    if (data.email) {
+        await sendVerificationEmail(data.email, verification_code);
+    }
+    res.json({ success: true, verification_required: true, message: 'Account created. Please check your email for the verification code.', verification_code: null });
+});
+
+// /collect
+app.post('/collect', (req, res) => {
+    const entry = {
+        ...req.body,
+        timestamp: new Date().toISOString(),
+        ip: req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress
+    };
+    try {
+        fs.appendFileSync(LOG_FILE_PATH, JSON.stringify(entry) + '\n');
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to save analytics' });
+    }
+});
+
+// /banned-ips
+app.get('/banned-ips', (req, res) => {
+    let ips = [];
+    if (fs.existsSync(BANNED_IPS_FILE)) {
+        try { ips = JSON.parse(fs.readFileSync(BANNED_IPS_FILE, 'utf8')); } catch { ips = []; }
+    }
+    res.json(ips);
+});
+// /banned-macs
+app.get('/banned-macs', (req, res) => {
+    let macs = [];
+    if (fs.existsSync(BANNED_MACS_FILE)) {
+        try { macs = JSON.parse(fs.readFileSync(BANNED_MACS_FILE, 'utf8')); } catch { macs = []; }
+    }
+    res.json(macs);
+});
+// /unban-ip
+app.post('/unban-ip', (req, res) => {
+    const { ip } = req.body;
+    if (!ip) return res.status(400).json({ error: 'Missing IP' });
+    let ips = [];
+    if (fs.existsSync(BANNED_IPS_FILE)) {
+        try { ips = JSON.parse(fs.readFileSync(BANNED_IPS_FILE, 'utf8')); } catch { ips = []; }
+    }
+    ips = ips.filter(x => x !== ip);
+    fs.writeFileSync(BANNED_IPS_FILE, JSON.stringify(ips, null, 2));
+    res.json({ success: true });
+});
+// /unban-mac
+app.post('/unban-mac', (req, res) => {
+    const { mac } = req.body;
+    if (!mac) return res.status(400).json({ error: 'Missing MAC' });
+    let macs = [];
+    if (fs.existsSync(BANNED_MACS_FILE)) {
+        try { macs = JSON.parse(fs.readFileSync(BANNED_MACS_FILE, 'utf8')); } catch { macs = []; }
+    }
+    macs = macs.filter(x => x !== mac);
+    fs.writeFileSync(BANNED_MACS_FILE, JSON.stringify(macs, null, 2));
+    res.json({ success: true });
 });
 
 // --- Data endpoints for /latest tabs (all password protected) ---
