@@ -289,8 +289,24 @@ const {
     bannedAccounts
 } = require('./endpoints');
 
-// --- Use routes ---
-routes(app, helpers);
+// --- Initialize Routes ---
+app.post('/verify-account', verifyAccount);
+app.post('/account-signup', banSystem.bannedIPMiddleware, accountSignup);
+app.post('/ban-user', banUser);
+app.post('/temp-ban-user', tempBanUser);
+app.post('/delete-user', deleteUser);
+app.post('/cookie-verify', cookieVerify);
+app.post('/cookie-signup', banSystem.bannedIPMiddleware, cookieSignup);
+app.post('/send-newsletter', sendNewsletter);
+app.post('/collect', collect);
+app.get('/banned-ips', bannedIps);
+app.get('/banned-macs', bannedMacs);
+app.post('/unban-ip', unbanIp);
+app.post('/unban-mac', unbanMac);
+app.get('/latest.json', latestJson);
+app.get('/admin-settings', adminSettings);
+app.post('/admin-settings/update', adminSettingsUpdate);
+app.post('/banned-accounts', bannedAccounts);
 
 // --- Routes ---
 // --- Ensure all critical endpoints exist and are correct ---
