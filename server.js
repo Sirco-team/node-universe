@@ -243,12 +243,20 @@ app.get('/', (req, res) => {
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Serve /latest as a single-page app (with or without query params)
+// --- Serve /latest as a single-page app (with or without query params) ---
 app.get('/latest', (req, res) => {
-    res.sendFile('latest.html', { root: __dirname });
+    const latestPath = path.resolve(__dirname, 'latest.html');
+    if (!fs.existsSync(latestPath)) {
+        return res.status(404).send('latest.html not found in project root. Please add latest.html to your project root.');
+    }
+    res.sendFile(latestPath);
 });
 app.get('/latest.html', (req, res) => {
-    res.sendFile('latest.html', { root: __dirname });
+    const latestPath = path.resolve(__dirname, 'latest.html');
+    if (!fs.existsSync(latestPath)) {
+        return res.status(404).send('latest.html not found in project root. Please add latest.html to your project root.');
+    }
+    res.sendFile(latestPath);
 });
 
 // Password auth endpoint for /latest (POST)
@@ -453,25 +461,21 @@ app.post('/cookie-verify', (req, res) => {
     }
     const userKey = Object.keys(db).find(u => u.toLowerCase() === (username || '').toLowerCase());
     const user = db[userKey];
-    if (user && user.password === password) {
-        if (user.banned) {
-            return res.status(403).json({ error: 'Account is banned.' });
-        }
-        if (!user.verified) {
-            return res.status(403).json({ error: 'Account not verified.' });
-        }
-        // Update last_ip and last_ip_used
-        if (last_ip) user.last_ip = last_ip;
-        if (last_ip_used) user.last_ip_used = last_ip_used;
-        db[userKey] = user;
-        fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
-        return res.json({ valid: true, ...user });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.password !== password) return res.status(401).json({ error: 'Incorrect password' });
+    if (user.banned) {
+        return res.status(403).json({ error: 'Account is banned.' });
     }
-    res.json({ valid: false });
+    if (!user.verified) {
+        return res.status(403).json({ error: 'Account not verified.' });
+    }
+    // Update last_ip and last_ip_used
+    if (last_ip) user.last_ip = last_ip;
+    if (last_ip_used) user.last_ip_used = last_ip_used;
+    db[userKey] = user;
+    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
+    return res.json({ valid: true, ...user });
 });
-
-// --- Add missing ADMIN_SETTINGS_FILE declaration ---
-const ADMIN_SETTINGS_FILE = path.join(DATA_DIR, 'admin-settings.json');
 
 // --- Send newsletter email to all signups ---
 app.post('/send-newsletter', async (req, res) => {
@@ -568,238 +572,81 @@ app.post('/banned-accounts', (req, res) => {
     res.json({ banned, temp_banned });
 });
 
-// --- Account signup endpoint (not newsletter) ---
-app.post('/account-signup', bannedIPMiddleware, async (req, res, next) => {
-    if (req.body.banned_permanent === '1') {
-        return res.status(403).json({ error: 'This device is permanently banned.' });
-    }
-    const data = { ...req.body, timestamp: new Date().toISOString() };
-    // Username validation
-    const username = (data.username || '').toLowerCase();
-    if (!/^[a-z0-9_-]+$/.test(username)) {
-        return res.status(400).json({ error: 'Username must only contain letters, numbers, underscores, or hyphens (no spaces or special characters).'});
-    }
-    // Save creation_ip
-    if (!data.creation_ip) {
-        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
-        data.creation_ip = ip;
-    }
-    // Save last_ip_used
-    if (!data.last_ip_used) {
-        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.connection.remoteAddress;
-        data.last_ip_used = ip;
-    }
-    // Load DB
-    const ACCOUNTS_FILE_PATH = path.join(DATA_DIR, 'account-signups.json');
-    let db = {};
-    if (fs.existsSync(ACCOUNTS_FILE_PATH)) {
-        try { db = JSON.parse(fs.readFileSync(ACCOUNTS_FILE_PATH, 'utf8')); } catch { db = {}; }
-    }
-    // Prevent duplicate usernames (case-insensitive)
-    if (Object.keys(db).some(u => u.toLowerCase() === username)) {
-        return res.status(400).json({ error: 'Username already exists.' });
-    }
-    // Generate verification code
-    const verification_code = uuidv4().slice(0, 8).toUpperCase();
-    db[data.username] = { ...data, last_ip: data.creation_ip, last_ip_used: data.last_ip_used, verified: false, verification_code };
-    fs.writeFileSync(ACCOUNTS_FILE_PATH, JSON.stringify(db, null, 2));
-    // Send verification code to email if provided
-    if (data.email) {
-        await sendVerificationEmail(data.email, verification_code);
-    }
-    res.json({ success: true, verification_required: true, message: 'Account created. Please check your email for the verification code.', verification_code: null });
-});
-// --- Verification endpoint ---
-app.post('/verify-account', (req, res) => {
-    const { username, code } = req.body;
-    if (!username || !code) return res.status(400).json({ error: 'Missing username or code' });
-    let db = {};
-    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
-        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
-    }
-    const user = db[username];
-    if (!user || user.verified) return res.status(400).json({ error: 'Invalid or already verified' });
-    if (user.verification_code !== code) return res.status(400).json({ error: 'Incorrect verification code' });
-    user.verified = true;
-    delete user.verification_code;
-    db[username] = user;
-    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
-    res.json({ success: true });
-});
-// --- Ban user endpoint ---
-app.post('/ban-user', (req, res) => {
-    const { username } = req.body;
-    if (!username) return res.status(400).json({ error: 'Missing username' });
-    let db = {};
-    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
-        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
-    }
-    const user = db[username];
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    user.banned = true;
-    db[username] = user;
-    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
-    res.json({ success: true });
-});
-// --- Temp ban endpoint ---
-app.post('/temp-ban-user', (req, res) => {
-    const { username, duration } = req.body; // duration in ms
-    if (!username || !duration) return res.status(400).json({ error: 'Missing username or duration' });
-    const ACCOUNTS_FILE_PATH = path.join(DATA_DIR, 'account-signups.json');
-    let db = {};
-    if (fs.existsSync(ACCOUNTS_FILE_PATH)) {
-        try { db = JSON.parse(fs.readFileSync(ACCOUNTS_FILE_PATH, 'utf8')); } catch { db = {}; }
-    }
-    const user = db[username];
-    if (!user) return res.status(404).json({ error: 'User not found' });
-    const now = Date.now();
-    user.temp_ban_until = now + duration;
-    db[username] = user;
-    fs.writeFileSync(ACCOUNTS_FILE_PATH, JSON.stringify(db, null, 2));
-    res.json({ success: true, until: user.temp_ban_until });
-});
-// --- Delete user endpoint ---
-app.post('/delete-user', (req, res) => {
-    const { username } = req.body;
-    if (!username) return res.status(400).json({ error: 'Missing username' });
-    let db = {};
-    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
-        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
-    }
-    if (!db[username]) return res.status(404).json({ error: 'User not found' });
-    delete db[username];
-    fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
-    // Also remove from cloud saves
-    let cloud = {};
-    if (fs.existsSync(COOKIE_CLOUD_FILE)) {
-        try { cloud = JSON.parse(fs.readFileSync(COOKIE_CLOUD_FILE, 'utf8')); } catch { cloud = {}; }
-    }
-    if (cloud[username]) {
-        delete cloud[username];
-        fs.writeFileSync(COOKIE_CLOUD_FILE, JSON.stringify(cloud, null, 2));
-    }
-    res.json({ success: true });
-});
-// --- Cookie verify endpoint (login) ---
-app.post('/cookie-verify', (req, res) => {
-    if (req.body.banned_permanent === '1') {
-        return res.status(403).json({ error: 'This device is permanently banned.' });
-    }
-    const { username, password, last_ip, last_ip_used } = req.body;
-    let db = {};
-    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
-        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
-    }
-    const userKey = Object.keys(db).find(u => u.toLowerCase() === (username || '').toLowerCase());
-    const user = db[userKey];
-    if (user && user.password === password) {
-        if (user.banned) {
-            return res.status(403).json({ error: 'Account is banned.' });
-        }
-        if (!user.verified) {
-            return res.status(403).json({ error: 'Account not verified.' });
-        }
-        // Update last_ip and last_ip_used
-        if (last_ip) user.last_ip = last_ip;
-        if (last_ip_used) user.last_ip_used = last_ip_used;
-        db[userKey] = user;
-        fs.writeFileSync(NEWSLETTER_FILE_PATH, JSON.stringify(db, null, 2));
-        return res.json({ valid: true, ...user });
-    }
-    res.json({ valid: false });
-});
-
-// --- Send newsletter email to all signups ---
-app.post('/send-newsletter', async (req, res) => {
-    const { subject, message } = req.body;
-    if (!subject || !message) return res.status(400).json({ error: 'Missing subject or message' });
-    if (!transporter) return res.status(500).json({ error: 'Email not configured' });
-    let db = {};
-    if (fs.existsSync(NEWSLETTER_FILE_PATH)) {
-        try { db = JSON.parse(fs.readFileSync(NEWSLETTER_FILE_PATH, 'utf8')); } catch { db = {}; }
-    }
-    const recipients = Object.values(db)
-        .filter(u => u.email && u.verified)
-        .map(u => u.email);
-    if (recipients.length === 0) return res.status(400).json({ error: 'No verified emails to send to' });
+// --- Create admin-settings.json if missing ---
+const ADMIN_SETTINGS_FILE = path.join(DATA_DIR, 'admin-settings.json');
+if (!fs.existsSync(ADMIN_SETTINGS_FILE)) {
+    let creds = { email: '', password: '' };
     try {
-        for (const email of recipients) {
-            await transporter.sendMail({
-                from: 'timco307@gmail.com',
-                to: email,
-                subject,
-                text: message,
-                html: `<div style='font-family:sans-serif;max-width:500px;margin:auto;background:#f9f9f9;padding:2em;border-radius:8px;'>${message.replace(/\n/g,'<br>')}</div>`
-            });
+        const credsPath = path.join(__dirname, 'gmail_creds.json');
+        if (fs.existsSync(credsPath)) {
+            creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
         }
-        res.json({ success: true, sent: recipients.length });
-    } catch (err) {
-        res.status(500).json({ error: 'Failed to send newsletter', detail: err.message });
-    }
-});
+    } catch (e) {}
+    fs.writeFileSync(ADMIN_SETTINGS_FILE, JSON.stringify({
+        fromEmail: creds.email || 'thereal.verify.universe@gmail.com',
+        apiKey: creds.email || '',
+        apiSecret: creds.password || ''
+    }, null, 2));
+    console.log('Created admin-settings.json in data directory.');
+}
 
-// --- Admin settings endpoints ---
+// --- Fix: Declare TRAFFIC_MODE variable ---
+let TRAFFIC_MODE = null;
 
-// Get admin settings
-app.get('/admin-settings', (req, res) => {
-    let settings = {};
-    if (fs.existsSync(ADMIN_SETTINGS_FILE)) {
-        try { settings = JSON.parse(fs.readFileSync(ADMIN_SETTINGS_FILE, 'utf8')); } catch { settings = {}; }
-    }
-    res.json({
-        fromEmail: settings.fromEmail || GMAIL_USER || '',
-        apiKey: settings.apiKey || '',
-        apiSecret: settings.apiSecret || ''
+// --- Start HTTP or HTTPS server ---
+if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
+    const sslOptions = {
+        key: fs.readFileSync(SSL_KEY_PATH),
+        cert: fs.readFileSync(SSL_CERT_PATH)
+    };
+    https.createServer(sslOptions, app).listen(HTTPS_PORT, () => {
+        console.log(`Analytics backend listening on HTTPS port ${HTTPS_PORT}`);
+        console.log(`Access from your Pi's browser: https://` + getLocalIP() + `:${HTTPS_PORT}`);
     });
-});
+} else {
+    app.listen(PORT, () => {
+        console.log(`Analytics backend listening on HTTP port ${PORT} (SSL certs not found)`);
+        console.log(`Access from your Pi's browser: http://` + getLocalIP() + `:${PORT}`);
+    });
+}
 
-// Update admin settings
-app.post('/admin-settings/update', (req, res) => {
-    const { password, fromEmail, emailPass, apiKey, apiSecret } = req.body;
-    let settings = {};
-    if (fs.existsSync(ADMIN_SETTINGS_FILE)) {
-        try { settings = JSON.parse(fs.readFileSync(ADMIN_SETTINGS_FILE, 'utf8')); } catch { settings = {}; }
+// --- Banned IPs endpoint ---
+app.get('/banned-ips', (req, res) => {
+    let ips = [];
+    if (fs.existsSync(BANNED_IPS_FILE)) {
+        try { ips = JSON.parse(fs.readFileSync(BANNED_IPS_FILE, 'utf8')); } catch { ips = []; }
     }
-    if (fromEmail) settings.fromEmail = fromEmail;
-    if (emailPass) settings.emailPass = emailPass;
-    if (apiKey) settings.apiKey = apiKey;
-    if (apiSecret) settings.apiSecret = apiSecret;
-    fs.writeFileSync(ADMIN_SETTINGS_FILE, JSON.stringify(settings, null, 2));
-    // Update in-memory config
-    if (fromEmail) GMAIL_USER = fromEmail;
-    if (emailPass) GMAIL_PASS = emailPass;
-    if (apiKey) process.env.MJ_APIKEY_PUBLIC = apiKey;
-    if (apiSecret) process.env.MJ_APIKEY_PRIVATE = apiSecret;
-    if (password) {
-        process.env.LATEST_PASSWORD = password;
+    res.json(ips);
+});
+// --- Banned MACs endpoint ---
+app.get('/banned-macs', (req, res) => {
+    let macs = [];
+    if (fs.existsSync(BANNED_MACS_FILE)) {
+        try { macs = JSON.parse(fs.readFileSync(BANNED_MACS_FILE, 'utf8')); } catch { macs = []; }
     }
-    // Recreate transporter if needed
-    if (GMAIL_USER && GMAIL_PASS) {
-        transporter = nodemailer.createTransport({
-            host: 'in-v3.mailjet.com',
-            port: 587,
-            secure: false,
-            auth: { user: GMAIL_USER, pass: GMAIL_PASS }
-        });
+    res.json(macs);
+});
+// --- Unban IP endpoint ---
+app.post('/unban-ip', (req, res) => {
+    const { ip } = req.body;
+    if (!ip) return res.status(400).json({ error: 'Missing IP' });
+    let ips = [];
+    if (fs.existsSync(BANNED_IPS_FILE)) {
+        try { ips = JSON.parse(fs.readFileSync(BANNED_IPS_FILE, 'utf8')); } catch { ips = []; }
     }
+    ips = ips.filter(x => x !== ip);
+    fs.writeFileSync(BANNED_IPS_FILE, JSON.stringify(ips, null, 2));
     res.json({ success: true });
 });
-// --- Banned accounts check endpoint ---
-app.post('/banned-accounts', (req, res) => {
-    const { usernames } = req.body || {};
-    if (!Array.isArray(usernames) || usernames.length === 0) return res.json({ banned: [], temp_banned: [] });
-    const ACCOUNTS_FILE_PATH = path.join(DATA_DIR, 'account-signups.json');
-    let db = {};
-    if (fs.existsSync(ACCOUNTS_FILE_PATH)) {
-        try { db = JSON.parse(fs.readFileSync(ACCOUNTS_FILE_PATH, 'utf8')); } catch { db = {}; }
+// --- Unban MAC endpoint ---
+app.post('/unban-mac', (req, res) => {
+    const { mac } = req.body;
+    if (!mac) return res.status(400).json({ error: 'Missing MAC' });
+    let macs = [];
+    if (fs.existsSync(BANNED_MACS_FILE)) {
+        try { macs = JSON.parse(fs.readFileSync(BANNED_MACS_FILE, 'utf8')); } catch { macs = []; }
     }
-    const now = Date.now();
-    const banned = [];
-    const temp_banned = [];
-    usernames.forEach(u => {
-        const user = db[u];
-        if (user && user.banned) banned.push(u);
-        else if (user && user.temp_ban_until && user.temp_ban_until > now) temp_banned.push({ username: u, until: user.temp_ban_until });
-    });
-    res.json({ banned, temp_banned });
+    macs = macs.filter(x => x !== mac);
+    fs.writeFileSync(BANNED_MACS_FILE, JSON.stringify(macs, null, 2));
+    res.json({ success: true });
 });
